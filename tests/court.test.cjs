@@ -60,4 +60,16 @@ assert.equal(Court.selectShootingPosition(sample.map(f=>({...f,poses:f.poses.map
 assert.equal(Court.selectShootingPosition([{time:1,poses:[pose({wrists:.2}),pose({x:.8,wrists:.2})]}],2.4).candidate,null);
 assert.equal(Court.selectShootingPosition([{time:1,poses:[pose()]},{time:1.2,poses:[pose()]}],2.4).candidate,null);
 assert.equal(Court.selectShootingPosition([{time:1,poses:[pose({visible:.2})]}],2.4).candidate,null);
+const standing=pose();standing[15].visibility=standing[16].visibility=0;
+assert.ok(Court.currentPersonFoot([standing],10).point);
+assert.equal(Court.currentPersonFoot([standing,standing],10).point,null);
+assert.equal(Court.currentPersonFoot([pose({feet:1.1})],10).point,null);
+assert.equal(Court.zone({x:5,y:8},true),'圖上右側');
+const relative=Court.summarize([{result:'make',position:{x:5,y:8}}],{relative:true});
+assert.equal(relative.length,3);assert.equal(relative[2].makes,1);assert.equal(relative[2].accuracy,100);
+assert.ok(relative.every(z=>!z.name.includes('三分')));
+const nearCamera=[.04,0,.5,0,.04,.5,0,-1/12,1];
+const nearPairs=corners.map(a=>({image:Court.project(nearCamera,a),court:a}));
+assert.throws(()=>Court.calibrate(nearPairs),/方向不合理/);
+assert.equal(Court.fitCalibration(nearPairs,{depth:10}).method,'perspective');
 console.log('Court checks passed: perspective projection, bad calibration, horizon, bounds, zones, unknown/ignored counts');

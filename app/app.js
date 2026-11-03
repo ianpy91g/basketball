@@ -15,6 +15,7 @@ const TRAJECTORY_COLOR='#ff8c00';
 const HOOP_COLOR='#003b8e';
 let mapVisible=false,courtAction=null,courtPairs=[],courtAnchor=null,courtPointer=null;
 let positionScan=null;
+let courtReference=null,referenceDetection=null;
 let selectedShotId=null,clipPlayback=false,reviewFrame=null,reviewAction=0,reviewSeek=false,sequenceFinished=false;
 let replayMode='loop';
 try{const saved=localStorage.getItem('basketball.playback-mode');if(['loop','sequence','once'].includes(saved))replayMode=saved;}catch{}
@@ -410,7 +411,8 @@ $('addShot').onclick=()=>{
 function download(content,name,type){const url=URL.createObjectURL(new Blob([content],{type}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 $('exportJson').onclick=()=>download(JSON.stringify({...data,summary:stats(data.events)},null,2),'練投紀錄.json','application/json');
 $('exportCsv').onclick=()=>{
-  const rows=[['球號','到框時間_秒','結果','自動結果','人工確認','線索','位置X_參考公尺_球場中央左右','位置Y_參考公尺_距底線','位置來源','定位影格_秒','位置校正品質'],...data.events.map(e=>[e.id,e.time,labels[e.result],labels[e.automatic_result]||'手動補記',e.reviewed?'是':'否',e.reason,Court.inCourt(e.position)?e.position.x:'',Court.inCourt(e.position)?e.position.y:'',e.position?positionSource(e):'',e.position?.video_time??e.location_candidate?.video_time??'',e.position?.calibration_quality||''])];
+  const relative=courtProfile().relative;
+  const rows=[['球號','到框時間_秒','結果','自動結果','人工確認','線索',relative?'位置X_相對百分比_左至右':'位置X_參考公尺_球場中央左右',relative?'位置Y_相對百分比_底線至遠端':'位置Y_參考公尺_距底線','位置來源','定位影格_秒','位置校正品質'],...data.events.map(e=>[e.id,e.time,labels[e.result],labels[e.automatic_result]||'手動補記',e.reviewed?'是':'否',e.reason,Court.inCourt(e.position)?(relative?+((e.position.x+7.5)/15*100).toFixed(2):e.position.x):'',Court.inCourt(e.position)?(relative?+(e.position.y/14*100).toFixed(2):e.position.y):'',e.position?positionSource(e):'',e.position?.video_time??e.location_candidate?.video_time??'',e.position?.calibration_quality||''])];
   download('\ufeff'+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(',')).join('\r\n'),'練投紀錄.csv','text/csv;charset=utf-8');
 };
 function history(){try{return JSON.parse(localStorage.getItem('basketball.sessions.v1')||'[]');}catch{return[];}}
@@ -440,6 +442,7 @@ function setReviewView(showMap){
 $('reviewListTab').onclick=()=>setReviewView(false);
 $('reviewMapTab').onclick=()=>setReviewView(true);
 function cancelCourtAction(){
+  referenceDetection?.abort();courtReference=null;
   courtAction=null;courtPairs=[];courtAnchor=null;courtPointer=null;
   $('stage').classList.remove('mapping');
   if(!calibrating&&!running)$('stageLabel').hidden=true;
@@ -454,7 +457,8 @@ function courtSvgPoint(e){
   const svg=$('courtGraphic').querySelector('svg'),matrix=svg?.getScreenCTM();
   if(!matrix)return null;
   const p=new DOMPoint(e.clientX,e.clientY).matrixTransform(matrix.inverse());
-  return Court.inCourt(p)?{x:p.x,y:p.y}:null;
+  const depth=courtDepth(),tolerance=.1;
+  return p.x>=-7.5-tolerance&&p.x<=7.5+tolerance&&p.y>=-tolerance&&p.y<=depth+tolerance?{x:Math.max(-7.5,Math.min(7.5,p.x)),y:Math.max(0,Math.min(depth,p.y))}:null;
 }
 function prepareLocation(event){
   cancelCourtAction();cancelReviewClock();reviewAction++;clipPlayback=false;sequenceFinished=false;
@@ -472,16 +476,54 @@ function placeShot(p,method,image=null){
   message(`第 ${event.id} 球位置已儲存 · ${labels[event.result]}。${method==='map'?'這是人工在球場圖上估計的位置。':'位置由人工腳下標記與球場校正換算。'}`);
 }
 function chooseCourtAnchor(id){
-  const anchor=Court.anchors.find(a=>a.id===id);if(!anchor)return;
+  const existing=courtPairs.find(p=>p.anchor===id);
+  const anchor=Court.anchors.find(a=>a.id===id)||(existing?{id,label:existing.label||'自訂參考點',...existing.court,kind:existing.kind}:null);if(!anchor)return;
+  referenceDetection?.abort();courtReference=null;
   courtAnchor=anchor;refreshCourt();
 }
 function finishCourtPair(image){
   if(!courtAnchor)return;
-  const pair={anchor:courtAnchor.id,image,court:{x:courtAnchor.x,y:courtAnchor.y}};
+  const pair={anchor:courtAnchor.id,image,court:{x:courtAnchor.x,y:courtAnchor.y},...(courtAnchor.kind?{kind:courtAnchor.kind,label:courtAnchor.label,image_time:video.currentTime,source:'manual',estimated:true}:{})};
   const index=courtPairs.findIndex(p=>p.anchor===courtAnchor.id);
   if(index<0)courtPairs.push(pair);else courtPairs[index]=pair;
   courtAnchor=null;
   refreshCourt();draw();
+}
+function courtProfile(){return {extent:data?.courtProfile?.extent==='full'?'full':'near',relative:!!data?.courtProfile?.relative};}
+function courtDepth(){return courtProfile().extent==='full'?14:10;}
+function offeredCourtAnchors(){return Court.anchors.filter(a=>!courtProfile().relative&&a.y<=courtDepth());}
+function courtPairMark(pair,index,pairs){
+  if(pair.kind)return `${pair.kind==='person'?'P':'G'}${pairs.slice(0,index+1).filter(p=>p.kind===pair.kind).length}`;
+  return String(Court.anchors.findIndex(a=>a.id===pair.anchor)+1||index+1);
+}
+function beginCourtReference(kind){
+  if(courtAction!=='calibrate'||!canReview())return;
+  referenceDetection?.abort();courtAnchor=null;video.pause();
+  const ordinal=courtPairs.filter(p=>p.kind===kind).length+1;
+  courtReference={id:`${kind}-${crypto.randomUUID()}`,kind,label:kind==='person'?`人物參考點 ${ordinal}`:`自訂地面點 ${ordinal}`,image:null,image_time:video.currentTime,source:'manual'};
+  refreshCourt();draw();
+  message('先點影片中的腳下或地面位置，再到球場圖點同一處的大約位置。此參考點會加入校正，不會套用成每球的出手位置。');
+}
+function finishCustomCourtPair(p){
+  if(!courtReference?.image)return;
+  courtPairs.push({anchor:courtReference.id,kind:courtReference.kind,label:courtReference.label,image:courtReference.image,court:p,image_time:courtReference.image_time,source:courtReference.source,estimated:true});
+  courtReference=null;refreshCourt();draw();
+}
+async function detectReferenceFoot(){
+  if(!courtReference||courtReference.kind!=='person'||courtReference.image||referenceDetection||!canReview())return;
+  const reference=courtReference,controller=new AbortController();referenceDetection=controller;loading=true;controls();
+  message('正在找目前畫面中的腳下位置，首次需要下載模型。');
+  try{
+    const model=await abortable(Court.createPoseEstimator(),controller.signal,60000);
+    if(courtReference!==reference||controller.signal.aborted)return;
+    video.pause();
+    const canvas=document.createElement('canvas');canvas.width=Math.min(640,video.videoWidth);canvas.height=Math.round(video.videoHeight*canvas.width/video.videoWidth);
+    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+    const result=Court.currentPersonFoot(model.detect(canvas).landmarks||[],video.currentTime);
+    if(result.point){reference.image=result.point;reference.image_time=video.currentTime;reference.source='pose';message('已找到腳下參考點。請在球場圖點選他目前站的大約位置。');}
+    else message(result.reason,true);
+  }catch(error){if(error.name!=='AbortError')message(`無法自動找腳下：${error.message} 可直接點選影片中的腳下地面。`,true);}
+  finally{referenceDetection=null;loading=false;controls();refreshCourt();draw();if(courtReference?.image)revealInside($('courtPanel'),$('courtGraphic'));}
 }
 function projectRecordedPositions(resetReview=false){
   const calibration=data?.courtCalibration;
@@ -498,10 +540,10 @@ function projectRecordedPositions(resetReview=false){
 }
 async function completeCourtCalibration(){
   if(!data||running||loading||courtAction!=='calibrate')return;
-  if(courtAnchor){message('尚有一個地標還沒點影片位置，請先配對或退回該點。',true);return;}
+  if(courtAnchor||courtReference){message('尚有參考點未配對，請完成兩邊的位置或退回該點。',true);return;}
   try{
-    const fit=Court.fitCalibration(courtPairs,{aspect:overlay.width/overlay.height,mirror:$('courtMirror').checked});
-    data.courtCalibration={version:2,template:'fiba-2024',...fit,pairs:structuredClone(courtPairs),width:overlay.width,height:overlay.height,mirror:$('courtMirror').checked};
+    const fit=Court.fitCalibration(courtPairs,{aspect:overlay.width/overlay.height,mirror:$('courtMirror').checked,depth:Math.max(courtDepth(),...courtPairs.map(p=>p.court.y))});
+    data.courtCalibration={version:3,template:courtProfile().relative?'relative':'fiba-2024',...fit,pairs:structuredClone(courtPairs),width:overlay.width,height:overlay.height,mirror:$('courtMirror').checked};
     $('reviewMapTab').focus({preventScroll:true});
     projectRecordedPositions(true);cancelCourtAction();refreshCourt();draw();saveSession();
     revealInside($('courtPanel'),$('courtGraphic'));
@@ -511,17 +553,18 @@ async function completeCourtCalibration(){
 }
 const positionSource=e=>e.position?.method==='auto'?(e.position.location_reviewed?'自動估計 · 已確認':'自動估計 · 待複核'):e.position?.method==='video'?'影片人工定位':'圖上人工估計';
 function renderCourt(){
-  const arcY=1.575+Math.sqrt(6.75**2-6.6**2);
-  $('courtGraphic').innerHTML=`<svg viewBox="-8 -.5 16 15" role="group" aria-label="投籃位置半場圖，籃框在上方">
-    <defs><clipPath id="courtClip"><rect x="-7.5" y="0" width="15" height="14"/></clipPath></defs>
-    <rect class="court-floor" x="-7.5" y="0" width="15" height="14"/>
-    <g class="court-lines" clip-path="url(#courtClip)"><rect class="court-key" x="-2.45" y="0" width="4.9" height="5.8"/>
+  const arcY=1.575+Math.sqrt(6.75**2-6.6**2),depth=courtDepth(),relative=courtProfile().relative;
+  const guides=relative?`<g class="relative-guides"><path d="M -2.5 0 V ${depth} M 2.5 0 V ${depth} M -7.5 ${depth/2} H 7.5"/></g>`:`<rect class="court-key" x="-2.45" y="0" width="4.9" height="5.8"/>
     <circle cx="0" cy="5.8" r="1.8"/><circle cx="0" cy="14" r="1.8"/>
     <path d="M -6.6 0 V ${arcY} A 6.75 6.75 0 0 0 6.6 ${arcY} V 0"/>
-    <path d="M -1.3 1.575 A 1.3 1.3 0 0 0 1.3 1.575 M -1.3 1.575 V 1.2 M 1.3 1.575 V 1.2"/>
+    <path d="M -1.3 1.575 A 1.3 1.3 0 0 0 1.3 1.575 M -1.3 1.575 V 1.2 M 1.3 1.575 V 1.2"/>`;
+  $('courtGraphic').innerHTML=`<svg viewBox="-8 -.5 16 ${depth+1}" role="group" aria-label="${relative?'相對位置示意圖':depth===10?'三分線附近的球場圖':'完整半場圖'}，籃框在上方">
+    <defs><clipPath id="courtClip"><rect x="-7.5" y="0" width="15" height="${depth}"/></clipPath></defs>
+    <rect class="court-floor" x="-7.5" y="0" width="15" height="${depth}"/>
+    <g class="court-lines" clip-path="url(#courtClip)">${guides}
     <path class="court-backboard" d="M -.9 1.2 H .9"/><circle class="court-rim" cx="0" cy="1.575" r=".225"/>
-    <rect x="-7.5" y="0" width="15" height="14"/></g>
-    <text class="court-caption" x="0" y="-.15">底線 · 籃框方向</text><g id="courtMarks"></g><g id="courtAnchors"></g></svg>`;
+    <path d="M -7.5 ${depth} V 0 H 7.5 V ${depth}"/></g>
+    <text class="court-caption" x="0" y="-.15">底線 · 籃框方向</text><text class="court-caption" x="0" y="${depth+.35}">${relative?'相對位置，非實際距離':depth===10?'顯示範圍，並非中場線':'中場方向'}</text><g id="courtMarks" clip-path="url(#courtClip)"></g><g id="courtAnchors"></g></svg>`;
   const ns='http://www.w3.org/2000/svg';
   const node=(name,attrs,parent,text)=>{const el=document.createElementNS(ns,name);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,String(v));if(text!==undefined)el.textContent=text;parent.append(el);return el;};
   for(const event of data?.events||[]){
@@ -535,15 +578,26 @@ function renderCourt(){
     else node('path',{d:'M 0 -.22 L .2 0 L 0 .22 L -.2 0 Z',class:'court-symbol'},g);
     if(event.id===selectedShotId)node('text',{x:.36,y:-.27,class:'court-shot-number'},g,event.id);
   }
-  if(courtAction==='calibrate')for(const [i,a] of Court.anchors.entries()){
+  const anchors=offeredCourtAnchors().map(a=>({...a,mark:String(Court.anchors.indexOf(a)+1)}));
+  const pairs=courtAction==='calibrate'?courtPairs:data?.courtCalibration?.pairs||[];
+  for(const [i,p] of pairs.entries()){
+    if(!p.kind||p.court.y>depth)continue;
+    anchors.push({id:p.anchor,label:p.label||'自訂參考點',...p.court,mark:courtPairMark(p,i,pairs)});
+  }
+  for(const a of anchors){
+    if(courtAction!=='calibrate'&&!a.id.startsWith('person-')&&!a.id.startsWith('ground-'))continue;
     const used=courtPairs.some(p=>p.anchor===a.id);
-    const g=node('g',{class:`court-anchor${used?' used':''}${courtAnchor?.id===a.id?' active':''}`,transform:`translate(${a.x} ${a.y})`,'data-anchor':a.id,tabindex:0,role:'button','aria-label':`${i+1} ${a.label}${used?' 已設定，可重點':''}`},$('courtAnchors'));
-    node('title',{},g,`${i+1} ${a.label}`);node('circle',{r:.32},g);node('text',{y:.12},g,i+1);
+    const g=node('g',{class:`court-anchor${used?' used':''}${courtAnchor?.id===a.id?' active':''}`,transform:`translate(${a.x} ${a.y})`,'data-anchor':a.id,tabindex:courtAction==='calibrate'?0:-1,role:courtAction==='calibrate'?'button':'img','aria-label':`${a.mark} ${a.label}${used?' 已設定，可重點':''}`},$('courtAnchors'));
+    node('title',{},g,a.label);node('circle',{r:.32},g);node('text',{y:.12},g,a.mark);
   }
 }
 function refreshCourt(){
   const events=(data?.events||[]).filter(e=>e.result!=='ignored'),event=selectedShot(),busy=running||loading;
   const located=events.filter(e=>Court.inCourt(e.position));
+  const profile=courtProfile(),outside=located.filter(e=>e.position.y>courtDepth()).length;
+  $('courtExtent').value=profile.extent;$('relativeCourt').checked=profile.relative;
+  $('courtExtent').disabled=$('relativeCourt').disabled=busy||!data;
+  $('courtViewHint').textContent=outside?`目前有 ${outside} 球在此顯示範圍外，切換「完整半場」可查看；紀錄仍保留。`:profile.relative?'依你指定的地面與人物參考點顯示相對位置，不推算實際距離或二／三分。':'中場線可不入鏡，使用看得見的地標或人物位置校正即可。';
   $('reviewEmpty').hidden=mapVisible||!!data?.events.length;
   const candidates=events.filter(e=>e.location_candidate).length;
   $('mapProgress').textContent=`${located.length} / ${events.length} 球已定位${!data?.courtCalibration?.matrix&&candidates?` · ${candidates} 待換算`:''}`;
@@ -557,9 +611,9 @@ function refreshCourt(){
   $('removePosition').disabled=!valid||!event.position;
   $('calibrateCourt').disabled=busy||!data||!canReview();
   $('locationBack').disabled=$('locationForward').disabled=!valid||!canReview();
-  $('locationInfo').textContent=!event?'完成球場校正後可自動抓出手點，也可選球人工定位。':Court.inCourt(event.position)?`第 ${event.id} 球：${positionSource(event)} · ${labels[event.result]} · ${Court.zone(event.position)}${event.position.calibration_quality?` · ${event.position.calibration_quality}`:''}`:event.location_candidate&&!data?.courtCalibration?.matrix?'已抓到影片上的出手點；目前只有參考點，補上至少第二點後才能換算位置。':event.position?.video_point?'此球換算後超出半場，請檢查校正或重新標記。':event.location_status||`第 ${event.id} 球尚未定位，可自動辨識或人工標記。`;
-  $('undoCourtPoint').hidden=courtAction!=='calibrate';$('undoCourtPoint').disabled=!courtPairs.length&&!courtAnchor;
-  $('finishCourtCalibration').hidden=courtAction!=='calibrate';$('finishCourtCalibration').disabled=!courtPairs.length||!!courtAnchor||busy;
+  $('locationInfo').textContent=!event?'完成球場校正後可自動抓出手點，也可選球人工定位。':Court.inCourt(event.position)?`第 ${event.id} 球：${positionSource(event)} · ${labels[event.result]} · ${Court.zone(event.position,profile.relative)}${event.position.calibration_quality?` · ${event.position.calibration_quality}`:''}`:event.location_candidate&&!data?.courtCalibration?.matrix?'已抓到影片上的出手點；目前只有參考點，補上至少第二點後才能換算位置。':event.position?.video_point?'此球換算後超出半場，請檢查校正或重新標記。':event.location_status||`第 ${event.id} 球尚未定位，可自動辨識或人工標記。`;
+  $('undoCourtPoint').hidden=courtAction!=='calibrate';$('undoCourtPoint').disabled=!courtPairs.length&&!courtAnchor&&!courtReference;
+  $('finishCourtCalibration').hidden=courtAction!=='calibrate';$('finishCourtCalibration').disabled=!courtPairs.length||!!courtAnchor||!!courtReference||busy;
   $('clearCourtPoints').hidden=courtAction!=='calibrate';
   $('courtMirrorLabel').hidden=courtAction!=='calibrate';
   $('autoLocateShots').disabled=busy||!canReview()||!events.length||!data?.courtCalibration?.pairs?.length;
@@ -568,23 +622,32 @@ function refreshCourt(){
   $('confirmPosition').disabled=busy;
   $('cancelCourtAction').hidden=!courtAction;
   $('courtLandmark').hidden=courtAction!=='calibrate';
+  $('courtLandmark').disabled=busy||!!courtReference;
+  $('courtReferenceTools').hidden=courtAction!=='calibrate';
+  $('addPersonReference').disabled=$('addGroundReference').disabled=busy||!!courtReference;
+  $('detectCurrentFoot').hidden=!(courtReference?.kind==='person'&&!courtReference.image);
+  $('detectCurrentFoot').disabled=busy;
   if(courtAction==='calibrate'){
     $('courtLandmark').replaceChildren();const prompt=document.createElement('option');prompt.value='';prompt.textContent='選擇圖上地標，再點影片同一位置';$('courtLandmark').append(prompt);
-    Court.anchors.forEach((a,i)=>{const o=document.createElement('option');o.value=a.id;o.textContent=`${i+1} · ${a.label}${courtPairs.some(p=>p.anchor===a.id)?'（已配對，可重點）':''}`;$('courtLandmark').append(o);});
+    const choices=offeredCourtAnchors().map(a=>({id:a.id,label:`${Court.anchors.indexOf(a)+1} · ${a.label}`}));
+    for(const p of courtPairs)if(!choices.some(a=>a.id===p.anchor))choices.push({id:p.anchor,label:p.label||Court.anchors.find(a=>a.id===p.anchor)?.label||'已保存參考點'});
+    choices.forEach(a=>{const o=document.createElement('option');o.value=a.id;o.textContent=`${a.label}${courtPairs.some(p=>p.anchor===a.id)?'（已配對，可重點）':''}`;$('courtLandmark').append(o);});
     $('courtLandmark').value=courtAnchor?.id||'';
   }
   let help=data?.courtCalibration?`已保存 ${data.courtCalibration.pairs.length} 點 · ${data.courtCalibration.quality||'透視估計'}。${data.courtCalibration.matrix?'少點與未涵蓋區域誤差較大，請複核位置。':'一點只能當參考；可先抓出手點，補點後再換算。'}鏡頭移動後請重新校正。`:'以 FIBA 矩形禁區為參考。點選看得清楚的地面地標，點完按完成；也可直接在圖上估計。';
   if(courtAction==='calibrate')help=`已配對 ${courtPairs.length} 點。${courtAnchor?`請點影片上的「${courtAnchor.label}」。`:'可繼續加點，或按「完成」。'}1 點保存參考、2 點粗估、3 點近似、4 點以上透視校正；地標盡量分散。已配對地標可重點修改。`;
+  if(courtReference)help=courtReference.image?`${courtReference.label}：已標影片位置，請在球場圖點出同一處的大約位置。這個位置屬於校正參考。`:`${courtReference.label}：先點影片中的${courtReference.kind==='person'?'腳下地面；也可按「自動找此刻腳下」':'可辨識的地面位置'}，再到球場圖點同一處。`;
   if(courtAction==='video')help=`請將第 ${event?.id} 球移到起跳前的影格，點選雙腳之間的地面位置。可拖曳影片進度或用 ±0.1 秒微調。`;
   if(courtAction==='map')help=`請點球場圖，儲存第 ${event?.id} 球的大約出手位置。`;
   $('courtHelp').textContent=help;
   $('stage').classList.toggle('mapping',courtAction==='calibrate'||courtAction==='video');
   if(courtAction==='calibrate'||courtAction==='video'){
-    $('stageLabel').hidden=false;$('stageLabel').textContent=courtAction==='video'?'點選起跳前，雙腳之間的地面':courtAnchor?`點選地面：${courtAnchor.label}`:'先在右側球場圖選擇地標';
+    $('stageLabel').hidden=false;$('stageLabel').textContent=courtReference?(courtReference.image?'已標腳下／地面；請在球場圖點對應位置':courtReference.kind==='person'?'點目前人物腳下，或自動找腳下':'點選自訂地面參考位置'):courtAction==='video'?'點選起跳前，雙腳之間的地面':courtAnchor?`點選地面：${courtAnchor.label}`:'先在右側球場圖選擇地標';
   }
   $('courtGraphic').classList.toggle('placing',courtAction==='map');
   renderCourt();$('courtZones').replaceChildren();
-  for(const z of Court.summarize(events)){
+  $('courtZoneNote').textContent=profile.relative?'依圖上左側、正面、右側統計；不推算實際距離或二／三分。待確認結果不列入命中率。':'只計入已標位置的球；待確認不列入命中率。區域以 FIBA 2024 參考線劃分。';
+  for(const z of Court.summarize(events,{relative:profile.relative})){
     const row=document.createElement('div');row.className='zone-row';
     const name=document.createElement('span');name.textContent=z.name;
     const detail=document.createElement('span');detail.textContent=z.total?`${z.makes} 進 / ${z.makes+z.misses} 判定${z.unknown?` · ${z.unknown} 待確認`:''}`:'尚無紀錄';
@@ -599,9 +662,19 @@ $('calibrateCourt').onclick=()=>{
   message('選看得清楚的地面對應點，點完按「完成」。不限制四點；點越少，遠離參考點的位置誤差越大。');
 };
 $('finishCourtCalibration').onclick=completeCourtCalibration;
-$('clearCourtPoints').onclick=()=>{courtPairs=[];courtAnchor=null;refreshCourt();draw();};
+$('clearCourtPoints').onclick=()=>{referenceDetection?.abort();courtPairs=[];courtAnchor=null;courtReference=null;refreshCourt();draw();};
+$('addPersonReference').onclick=()=>beginCourtReference('person');
+$('addGroundReference').onclick=()=>beginCourtReference('ground');
+$('detectCurrentFoot').onclick=detectReferenceFoot;
+function changeCourtProfile(){
+  if(!data||running||loading)return;
+  data.courtProfile={extent:$('courtExtent').value,relative:$('relativeCourt').checked};
+  if(data.courtCalibration)data.courtCalibration.template=data.courtProfile.relative?'relative':'fiba-2024';
+  refreshCourt();draw();saveSession();
+}
+$('courtExtent').onchange=$('relativeCourt').onchange=changeCourtProfile;
 $('courtLandmark').onchange=()=>chooseCourtAnchor($('courtLandmark').value);
-$('undoCourtPoint').onclick=()=>{if(courtAnchor)courtAnchor=null;else courtPairs.pop();refreshCourt();draw();};
+$('undoCourtPoint').onclick=()=>{if(courtReference){referenceDetection?.abort();courtReference=null;}else if(courtAnchor)courtAnchor=null;else courtPairs.pop();refreshCourt();draw();};
 $('cancelCourtAction').onclick=()=>{cancelCourtAction();refreshCourt();draw();};
 $('markVideoPosition').onclick=()=>{
   if(!selectedShot()||!canReview()||!data?.courtCalibration?.matrix)return;
@@ -618,7 +691,10 @@ $('locationBack').onclick=()=>stepLocation(-.1);$('locationForward').onclick=()=
 function courtClick(e){
   if(running||loading)return;
   if(courtAction==='map'){const p=courtSvgPoint(e);if(p)placeShot(p,'map');return;}
-  if(courtAction==='calibrate'){const anchor=e.target.closest('[data-anchor]');if(anchor)chooseCourtAnchor(anchor.dataset.anchor);return;}
+  if(courtAction==='calibrate'){
+    if(courtReference){if(courtReference.image){const p=courtSvgPoint(e);if(p)finishCustomCourtPair(p);}else message('請先標出影片中的腳下或地面位置。');return;}
+    const anchor=e.target.closest('[data-anchor]');if(anchor)chooseCourtAnchor(anchor.dataset.anchor);return;
+  }
   const mark=e.target.closest('[data-map-shot]');if(mark){const event=data?.events.find(s=>String(s.id)===mark.dataset.mapShot);if(event)jump(event);}
 }
 $('courtGraphic').addEventListener('click',courtClick);
@@ -631,7 +707,11 @@ overlay.addEventListener('pointerup',e=>{
   const down=courtPointer;courtPointer=null;if(!down||!['calibrate','video'].includes(courtAction)||running||loading)return;
   const p=normalizedImagePoint(e);if(!p||Math.hypot(p.x-down.x,p.y-down.y)>.025)return;
   video.pause();
-  if(courtAction==='calibrate'){finishCourtPair(p);return;}
+  if(courtAction==='calibrate'){
+    if(courtReference){courtReference.image=p;courtReference.image_time=video.currentTime;courtReference.source='manual';refreshCourt();draw();revealInside($('courtPanel'),$('courtGraphic'));}
+    else finishCourtPair(p);
+    return;
+  }
   const position=Court.project(data.courtCalibration.matrix,p);
   if(!Court.inCourt(position)){message('此點換算後超出半場。請確認點在地板上，或重新校正球場；也可直接在圖上標記。',true);return;}
   placeShot(position,'video',p);
@@ -639,15 +719,20 @@ overlay.addEventListener('pointerup',e=>{
 overlay.addEventListener('pointercancel',()=>{courtPointer=null;});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&courtAction){cancelCourtAction();refreshCourt();draw();}});
 function drawCourtOverlay(){
-  if(!mapVisible)return;
+  if(!mapVisible||!video.videoWidth)return;
   const pairs=courtAction==='calibrate'?courtPairs:data?.courtCalibration?.pairs||[];
-  ctx.save();ctx.font='bold 12px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+  const rect=overlay.getBoundingClientRect(),scale=Math.max(.05,Math.min(rect.width/overlay.width,rect.height/overlay.height));
+  const radius=Math.max(8,6/scale);
+  ctx.save();ctx.font=`bold ${Math.max(12,10/scale)}px sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
   for(const [i,pair] of pairs.entries()){
     const x=pair.image.x*overlay.width,y=pair.image.y*overlay.height;
-    const label=Court.anchors.findIndex(a=>a.id===pair.anchor)+1;
-    ctx.fillStyle=HOOP_COLOR;ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(String(label||i+1),x,y);
+    ctx.fillStyle=HOOP_COLOR;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(courtPairMark(pair,i,pairs),x,y);
   }
   const event=selectedShot(),p=event?.position;
+  if(courtReference?.image){
+    const x=courtReference.image.x*overlay.width,y=courtReference.image.y*overlay.height;
+    ctx.fillStyle=HOOP_COLOR;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.fillText(courtReference.kind==='person'?'P':'G',x,y);
+  }
   if(['video','auto'].includes(p?.method)&&p.video_point&&Math.abs(video.currentTime-p.video_time)<.25){
     const x=p.video_point.x*overlay.width,y=p.video_point.y*overlay.height;
     ctx.strokeStyle=HOOP_COLOR;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x-8,y);ctx.lineTo(x+8,y);ctx.moveTo(x,y-8);ctx.lineTo(x,y+8);ctx.stroke();
@@ -739,8 +824,8 @@ async function autoLocatePositions(retry=true){
 $('autoLocateShots').onclick=()=>autoLocatePositions(true);
 $('stopAutoPosition').onclick=()=>positionScan?.controller.abort();
 $('confirmPosition').onclick=()=>{const event=selectedShot();if(event?.position?.method==='auto'){event.position.location_reviewed=true;refreshCourt();saveSession();}};
-window.addEventListener('pagehide',()=>positionScan?.controller.abort());
-document.addEventListener('visibilitychange',()=>{if(document.hidden)positionScan?.controller.abort();});
+window.addEventListener('pagehide',()=>{positionScan?.controller.abort();referenceDetection?.abort();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){positionScan?.controller.abort();referenceDetection?.abort();}});
 window.addEventListener('pagehide',()=>{if(stream)stream.getTracks().forEach(t=>t.stop());});
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&running){stop(false);message('頁面已進入背景，為避免漏算已停止本次分析。');}});
 (async()=>{

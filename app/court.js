@@ -37,7 +37,7 @@
     for(let i=n-1;i>=0;i--){let value=a[i][n];for(let k=i+1;k<n;k++)value-=a[i][k]*out[k];out[i]=value/a[i][i];}
     return out;
   }
-  function calibrate(pairs){
+  function calibrate(pairs,{depth=14}={}){
     validatePairs(pairs);
     if(pairs.length<4)throw Error('透視校正至少需要四組地面對應點。');
     const rows=[];
@@ -47,7 +47,7 @@
     const h=leastSquares(rows,8).concat(1);
     // A court cannot pass through the projective horizon or fold over itself.
     const inverse=invert(h);
-    const corners=[{x:-7.5,y:0},{x:7.5,y:0},{x:7.5,y:14},{x:-7.5,y:14}];
+    const corners=[{x:-7.5,y:0},{x:7.5,y:0},{x:7.5,y:depth},{x:-7.5,y:depth}];
     const denominators=corners.map(p=>inverse[6]*p.x+inverse[7]*p.y+inverse[8]);
     if(denominators.some(d=>Math.abs(d)<1e-9)||!denominators.every(d=>Math.sign(d)===Math.sign(denominators[0])))throw Error('校正方向不合理。請確認影片點與球場圖地標一一對應。');
     return h;
@@ -58,11 +58,11 @@
       if(Math.hypot(pairs[i].image.x-pairs[j].image.x,pairs[i].image.y-pairs[j].image.y)<.005||Math.hypot(pairs[i].court.x-pairs[j].court.x,pairs[i].court.y-pairs[j].court.y)<.01)throw Error('對應點重複或太靠近，請調整或退回一點。');
     }
   }
-  function fitCalibration(pairs,{aspect=1,mirror=false}={}){
+  function fitCalibration(pairs,{aspect=1,mirror=false,depth=14}={}){
     validatePairs(pairs);
     if(pairs.length===1)return {matrix:null,method:'reference',quality:'僅參考點',rms:null};
     let matrix=null,method='',fallback=false;
-    if(pairs.length>=4){try{matrix=calibrate(pairs);method='perspective';}catch(error){fallback=true;}}
+    if(pairs.length>=4){try{matrix=calibrate(pairs,{depth});method='perspective';}catch(error){fallback=true;}}
     if(!matrix&&pairs.length>=3){
       try{
         const rows=[];
@@ -81,7 +81,7 @@
     }
     const rms=Math.sqrt(pairs.reduce((sum,p)=>{const q=project(matrix,p.image);return sum+(q?(q.x-p.court.x)**2+(q.y-p.court.y)**2:Infinity);},0)/pairs.length);
     if(!Number.isFinite(rms)||rms>1.5)throw Error('對應點互相矛盾，平均偏差超過 1.5 參考公尺。請調整錯誤的點再完成。');
-    return {matrix,method,rms,quality:method==='perspective'?'透視估計':method==='affine'?'近似估計':'少點粗估',fallback};
+    return {matrix,method,rms,quality:method==='perspective'?'透視估計':method==='affine'?'近似估計':'少點粗估',fallback,domain_depth:depth};
   }
   function invert(h){
     const [a,b,c,d,e,f,g,i,j]=h;
@@ -92,30 +92,40 @@
   }
   const inCourt=p=>!!p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.x>=-7.5&&p.x<=7.5&&p.y>=0&&p.y<=14;
   const zones=['禁區','左側中距離','正面中距離','右側中距離','左側三分','正面三分','右側三分'];
-  function zone(p){
+  function zone(p,relative=false){
     if(!inCourt(p))return null;
+    if(relative)return p.x<-2.45?'圖上左側':p.x>2.45?'圖上右側':'圖上正面';
     if(Math.abs(p.x)>=6.6||Math.hypot(p.x,p.y-1.575)>=6.75)return zones[p.x<-2.45?4:p.x>2.45?6:5];
     if(Math.abs(p.x)<=2.45&&p.y<=5.8)return zones[0];
     return zones[p.x<-2.45?1:p.x>2.45?3:2];
   }
-  function summarize(events){
-    return zones.map(name=>{
-      const shots=events.filter(e=>e.result!=='ignored'&&zone(e.position)===name);
+  function summarize(events,{relative=false}={}){
+    return (relative?['圖上左側','圖上正面','圖上右側']:zones).map(name=>{
+      const shots=events.filter(e=>e.result!=='ignored'&&zone(e.position,relative)===name);
       const makes=shots.filter(e=>e.result==='make').length,misses=shots.filter(e=>e.result==='miss').length;
       return {name,makes,misses,unknown:shots.filter(e=>e.result==='unknown').length,total:shots.length,accuracy:makes+misses?makes/(makes+misses)*100:null};
     });
   }
-  function poseEvidence(points,time){
+  function groundPerson(points,time){
     const visible=i=>{const p=points[i];return p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.x>0&&p.x<1&&p.y>0&&p.y<.99&&(p.visibility??0)>=.65&&(p.presence??1)>=.6;};
     if(![11,12,23,24,25,26,27,28,31,32].every(visible))return null;
     const hip={x:(points[23].x+points[24].x)/2,y:(points[23].y+points[24].y)/2};
     const shoulderY=(points[11].y+points[12].y)/2,torso=hip.y-shoulderY;
     if(torso<.045)return null;
-    const wrists=[15,16].filter(visible).map(i=>points[i]);if(!wrists.length)return null;
-    const raised=Math.max(...wrists.map(p=>(shoulderY-p.y)/torso));
     const feet={x:(points[31].x+points[32].x)/2,y:(points[31].y+points[32].y)/2};
     if(Math.abs(points[31].x-points[32].x)>.3||feet.y<=hip.y+torso*.5)return null;
-    return {time,hip,feet,raised,visibility:Math.min(...[27,28,31,32].map(i=>points[i].visibility))};
+    return {time,hip,feet,shoulderY,torso,visibility:Math.min(...[27,28,31,32].map(i=>points[i].visibility))};
+  }
+  function currentPersonFoot(poses,time){
+    const people=poses.map(p=>groundPerson(p,time)).filter(Boolean);
+    if(people.length!==1)return {point:null,reason:people.length?'偵測到多位人物，請點選要參考的那位人物腳下。':'腳部不夠清楚，請直接點選影片中的腳下地面。'};
+    return {point:people[0].feet,confidence:people[0].visibility};
+  }
+  function poseEvidence(points,time){
+    const body=groundPerson(points,time);if(!body)return null;
+    const wrists=[15,16].map(i=>points[i]).filter(p=>p&&p.x>0&&p.x<1&&p.y>0&&p.y<1&&(p.visibility??0)>=.65&&(p.presence??1)>=.6);
+    if(!wrists.length)return null;
+    return {...body,raised:Math.max(...wrists.map(p=>(body.shoulderY-p.y)/body.torso))};
   }
   function selectShootingPosition(samples,arrival){
     const evidence=samples.map(frame=>({time:frame.time,people:(frame.poses||[]).map(p=>poseEvidence(p,frame.time)).filter(Boolean)}));
@@ -146,6 +156,6 @@
     })().catch(error=>{estimatorPromise=null;throw error;});
     return estimatorPromise;
   }
-  const exported={anchors,project,calibrate,fitCalibration,invert,inCourt,zone,summarize,poseEvidence,selectShootingPosition,createPoseEstimator};
+  const exported={anchors,project,calibrate,fitCalibration,invert,inCourt,zone,summarize,poseEvidence,currentPersonFoot,selectShootingPosition,createPoseEstimator};
   if(typeof module!=='undefined'&&module.exports)module.exports=exported;else root.Court=exported;
 })(typeof globalThis!=='undefined'?globalThis:this);
