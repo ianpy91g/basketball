@@ -45,6 +45,7 @@ with sync_playwright() as p:
     assert page.evaluate('courtAction===\'calibrate\' && !data.courtCalibration')
     finish(page)
     assert page.evaluate("data.courtCalibration.pairs.length===1 && data.courtCalibration.matrix===null")
+    page.locator('#autoLocateShots').click();page.wait_for_function('!loading && !positionScan')
     assert page.evaluate('data.events.slice(1).every(e=>e.location_candidate && !Court.inCourt(e.position))')
     assert page.evaluate("data.events[0].position.method==='map' && data.events[0].position.x===-5")
     page.locator('#calibrateCourt').click();add_pair(page,'key-right-base',.55,.8);finish(page)

@@ -16,24 +16,24 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="./"><span class="brand-icon">◉</span> 投籃簿<span class="beta">實驗版 v2.5</span></a><span class="local-label"><i></i> 影片留在你的裝置與本機電腦</span></header>
+  <header class="topbar"><a class="brand" href="./"><span class="brand-icon">◉</span> 投籃簿<span class="beta">實驗版 v2.6</span></a><span class="local-label"><i></i> 影片留在你的裝置與本機電腦</span></header>
   <main>
     <section class="heading"><div><h1>逐球回看</h1><p class="subtitle">影片與逐球紀錄一起看，專心觀察每次出手。</p></div><div class="session-mark"><span>SESSION</span><strong id="sessionDate">—</strong></div></section>
     <div class="setup-area">
       <nav class="tabs" aria-label="分析模式"><button class="tab active" id="fileTab" aria-selected="true">影片分析</button><button class="tab" id="liveTab" aria-selected="false">即時練投</button><span>固定鏡頭 · 單人練投</span></nav>
-      <div class="toolbar" id="fileTools"><label class="button primary file-label">＋ 匯入影片<input id="fileInput" type="file" accept="video/*,.mts,.m2ts,.mov,.mp4,.m4v,.webm"></label><button class="button" id="sampleButton" hidden>載入範例</button><button class="button" id="calibrateButton" disabled>框選籃圈</button><button class="button accent" id="analyzeButton" disabled>開始分析 →</button></div>
-      <div class="toolbar" id="liveTools" hidden><button class="button primary" id="cameraButton">開啟後置相機</button><button class="button" id="liveCalibrateButton" disabled>框選籃圈</button><button class="button accent" id="startLiveButton" disabled>開始練投 →</button><label class="record-label"><input type="checkbox" id="recordToggle" checked> 同時錄影</label></div>
+      <div class="toolbar" id="fileTools"><label class="button primary file-label">＋ 匯入影片<input id="fileInput" type="file" accept="video/*,.mts,.m2ts,.mov,.mp4,.m4v,.webm"></label><button class="button" id="sampleButton" hidden>載入範例</button><button class="button" id="calibrateButton" disabled>設定籃圈與球場</button><button class="button accent" id="analyzeButton" disabled>開始分析 →</button></div>
+      <div class="toolbar" id="liveTools" hidden><button class="button primary" id="cameraButton">開啟後置相機</button><button class="button" id="liveCalibrateButton" disabled>設定籃圈與球場</button><button class="button accent" id="startLiveButton" disabled>開始練投 →</button><label class="record-label"><input type="checkbox" id="recordToggle" checked> 同時錄影</label></div>
       <div class="run-actions" id="runActions" hidden><div><span class="pulse"></span><strong id="runLabel">分析中</strong><span id="fpsLabel"></span></div><button class="button danger" id="stopButton">結束</button></div>
     </div>
     <div class="workspace" id="workspace">
       <section class="viewer-panel" aria-label="影片與單球播放">
         <div class="panel-top"><div><span class="dot"></span><strong id="sourceName">選擇一段練投影片</strong></div><span id="sourceMeta">尚未載入</span></div>
-        <div class="stage" id="stage"><video id="video" playsinline muted controls preload="metadata"></video><canvas id="overlay" aria-label="拖曳框選籃圈"></canvas><div class="empty" id="empty"><span>◎</span><h2>從一段練投開始</h2><p>匯入影片並框選籃圈，<br>分析後點選旁邊的球號回看。</p></div><div class="stage-label" id="stageLabel" hidden></div></div>
+        <div class="stage" id="stage"><video id="video" playsinline muted controls preload="metadata"></video><canvas id="overlay" aria-label="設定籃圈與球場參考點"></canvas><div class="empty" id="empty"><span>◎</span><h2>從一段練投開始</h2><p>匯入影片，設定籃圈與球場，<br>完成設定後開始分析。</p></div><div class="stage-label" id="stageLabel" hidden></div></div>
         <div class="playback-bar" id="playbackControls">
           <div class="clip-info"><strong id="activeShotLabel" aria-live="polite">選一球開始回看</strong><span id="clipRange"></span><span class="trajectory-key"><i></i>球的軌跡</span></div>
           <div class="playback-actions"><button class="button transport" id="previousShot" aria-label="上一球" disabled>上一球</button><button class="button primary transport" id="togglePlayback" disabled>播放</button><button class="button transport" id="nextShot" aria-label="下一球" disabled>下一球</button><label class="playback-mode-label"><span class="sr-only">播放方式</span><select id="playbackMode" aria-label="播放方式" disabled><option value="loop">單球循環</option><option value="sequence">依序播放</option><option value="once">單球一次</option></select></label></div>
         </div>
-        <div class="status" role="status" aria-live="polite" id="status">先匯入影片，再框選橢圓形籃圈。</div><progress id="progress" max="1" value="0" hidden></progress>
+        <div class="status" role="status" aria-live="polite" id="status">先匯入影片，再設定籃圈與球場，完成後開始分析。</div><progress id="progress" max="1" value="0" hidden></progress>
       </section>
       <aside class="review-panel" aria-label="逐球清單">
         <div class="review-heading"><div><p class="eyebrow">SHOT BY SHOT</p><h2>逐球紀錄</h2></div><div class="review-controls"><span id="reviewCount">尚無紀錄</span><button class="button small" id="addShot" disabled>＋ 補記</button></div></div>
@@ -42,6 +42,7 @@
         <div class="shot-list" id="shotRows" role="list" aria-label="逐球結果與修正"></div>
         <div class="review-empty" id="reviewEmpty">分析完成後，每球紀錄會出現在這裡。</div>
         <section id="courtPanel" class="court-panel" role="tabpanel" aria-labelledby="reviewMapTab" hidden>
+          <div class="scene-setup" id="sceneSetup" hidden><strong>分析前設定 · 同一個鏡頭只需設定一次</strong><p id="sceneSetupState" role="status">先框選籃圈，再加入看得到的地面／人物參考點。</p><div class="map-actions"><button class="button small" id="setupHoop">① 框選籃圈</button><button class="button small" id="setupCourt">② 球場／人物參考點</button></div><p>球場點可略過；點數不足時僅統計進／未進，位置待定位。即時練投若要定位，請同時錄影。</p></div>
           <div class="map-shot-picker"><label for="mapShot">目前球號</label><select id="mapShot" disabled><option>尚無投籃紀錄</option></select><span id="mapProgress">0 球已定位</span></div>
           <div class="court-options"><label>顯示範圍<select id="courtExtent"><option value="near">三分線附近</option><option value="full">完整半場</option></select></label><label><input type="checkbox" id="relativeCourt">非標準場地 · 相對位置</label></div><p class="map-hint" id="courtViewHint">中場線可不入鏡，使用看得見的地標校正即可。</p>
           <div id="courtGraphic" class="court-graphic"></div>
@@ -49,9 +50,9 @@
           <p id="locationInfo" class="map-info">先分析影片，再選球標記位置。</p>
           <div class="map-actions"><button class="button small" id="markVideoPosition" disabled>點影片腳下位置</button><button class="button small" id="markMapPosition" disabled>直接在圖上標記</button><button class="button small" id="removePosition" disabled>清除此球位置</button></div>
           <div class="location-frame"><span>移到起跳前、雙腳著地的影格</span><button class="button small" id="locationBack" disabled>−0.1 秒</button><button class="button small" id="locationForward" disabled>＋0.1 秒</button></div>
-          <div class="court-calibration"><div class="map-actions"><button class="button small" id="calibrateCourt" disabled>校正球場</button><button class="button small primary" id="finishCourtCalibration" hidden>完成</button><button class="button small" id="undoCourtPoint" hidden>退回一點</button><button class="button small" id="clearCourtPoints" hidden>清空點</button><button class="button small" id="cancelCourtAction" hidden>取消</button></div><select id="courtLandmark" aria-label="選擇球場校正地標" hidden></select><label class="mirror-label" id="courtMirrorLabel" hidden><input type="checkbox" id="courtMirror">少點粗估時反轉方向</label><p id="courtHelp" role="status" aria-live="polite">點選看得清楚的地標，點完按完成。</p></div>
+          <div class="court-calibration"><div class="map-actions"><button class="button small" id="calibrateCourt" disabled>設定籃圈與球場</button><button class="button small primary" id="finishCourtCalibration" hidden>完成設定</button><button class="button small" id="undoCourtPoint" hidden>退回一點</button><button class="button small" id="clearCourtPoints" hidden>清空點</button><button class="button small" id="cancelCourtAction" hidden>取消設定</button></div><select id="courtLandmark" aria-label="選擇球場校正地標" hidden></select><label class="mirror-label" id="courtMirrorLabel" hidden><input type="checkbox" id="courtMirror">少點粗估時反轉方向</label><p id="courtHelp" role="status" aria-live="polite">點選看得清楚的地標，完成整組設定後開始分析。</p></div>
           <div class="map-actions reference-actions" id="courtReferenceTools" hidden><button class="button small" id="addPersonReference">＋ 目前人物位置</button><button class="button small" id="addGroundReference">＋ 自訂地面點</button><button class="button small" id="detectCurrentFoot" hidden>自動找此刻腳下</button></div>
-          <div class="auto-location"><div class="map-actions"><button class="button small" id="autoLocateShots" disabled>自動抓所有出手位置</button><button class="button small" id="confirmPosition" hidden>確認此球位置</button><button class="button small danger" id="stopAutoPosition" hidden>停止定位</button></div><p id="positionScanStatus" role="status" aria-live="polite">完成校正後，自動辨識已記錄各球的出手位置；結果仍可人工修正。首次需連網下載模型，影片在本裝置分析。</p></div>
+          <div class="auto-location"><div class="map-actions"><button class="button small" id="autoLocateShots" disabled>自動抓所有出手位置</button><button class="button small" id="confirmPosition" hidden>確認此球位置</button><button class="button small danger" id="stopAutoPosition" hidden>停止定位</button></div><p id="positionScanStatus" role="status" aria-live="polite">先完成籃圈與球場設定，再按開始分析；計數後會接續估計出手位置。首次需連網下載模型，影片在本裝置分析。</p></div>
           <details class="zone-summary"><summary>各區命中率</summary><div id="courtZones"></div><p id="courtZoneNote">只計入已標位置的球；待確認不列入命中率。區域以 FIBA 2024 球場示意線劃分。</p></details>
         </section>
       </aside>

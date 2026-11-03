@@ -50,7 +50,7 @@ def upload_and_wait(file):
 def ui_analyze(page,file):
     page.locator('#fileInput').set_input_files(str(file))
     page.wait_for_function('jobId!==null && !loading && video.readyState>=2')
-    page.evaluate('hoop={left:48,top:130,right:110,bottom:156};controls();')
+    page.evaluate('hoop={left:48,top:130,right:110,bottom:156};data.setup={completed:true,aspect:overlay.width/overlay.height};controls();')
     page.locator('#analyzeButton').click()
     page.wait_for_function("data?.analysis_state==='complete' && !loading",timeout=40000)
 
@@ -121,7 +121,7 @@ try:
         posts=[];legacy.on('request',lambda r:posts.append(r.url) if r.method=='POST' else None)
         legacy.locator('#fileInput').set_input_files(str(ROOT/'artifacts/upload-test.mp4'))
         legacy.wait_for_function('video.readyState>=2')
-        legacy.evaluate('hoop={left:48,top:130,right:110,bottom:156};controls();')
+        legacy.evaluate('hoop={left:48,top:130,right:110,bottom:156};data.setup={completed:true,aspect:overlay.width/overlay.height};controls();')
         legacy.locator('#analyzeButton').click()
         legacy.wait_for_function("data?.analysis_state==='complete'",timeout=15000)
         legacy.locator('#sessionSummary > summary').click()

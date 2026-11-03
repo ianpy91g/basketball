@@ -33,6 +33,12 @@ def select_hoop(page):
     page.mouse.move(*point(110,156), steps=8)
     page.mouse.up()
     assert page.evaluate('hoop!==null && !calibrating')
+    assert page.evaluate('setupEditing===true')
+    for anchor,x,y in [('key-left-base',.15,.8),('key-right-base',.55,.8),('key-left-free',.15,.4),('key-right-free',.55,.4)]:
+        page.locator('#courtLandmark').select_option(anchor)
+        page.mouse.click(left+x*dims[0]*image_scale,top+y*dims[1]*image_scale)
+    page.locator('#finishCourtCalibration').click()
+    assert page.evaluate('!setupEditing && data.setup.completed')
 
 
 try:
@@ -48,6 +54,16 @@ try:
         page.on('request', lambda r: requests.append(r.url))
         page.goto('http://127.0.0.1:8771/basketball/')
         page.wait_for_function("document.querySelector('#liveTab').classList.contains('active')")
+        page.evaluate('''()=>{
+          Court.createPoseEstimator=async()=>({detect:()=>{
+            const p=Array.from({length:33},()=>({x:.35,y:.4,visibility:1,presence:1}));
+            for(const i of [11,12])p[i].y=.2;
+            for(const i of [23,24])p[i].y=.4;
+            for(const i of [25,26])p[i].y=.5;
+            for(const i of [27,28,29,30,31,32])p[i].y=.6;
+            p[15].y=p[16].y=.12;p[31].x=.325;p[32].x=.375;return {landmarks:[p]};
+          }});
+        }''')
         assert page.evaluate('backend===false')
         assert page.locator('#sampleButton').is_hidden()
         page.locator('#fileTab').click()
@@ -56,20 +72,23 @@ try:
         select_hoop(page)
         page.locator('#analyzeButton').click()
         page.wait_for_function('running===true')
-        page.wait_for_function('running===false', timeout=15000)
+        page.wait_for_function('!running && !loading && !positionScan', timeout=30000)
         file_counts = page.evaluate('stats(data.events)')
         assert file_counts['make']==1 and file_counts['miss']==0, file_counts
+        assert page.evaluate("data.courtCalibration.pairs.length===4 && data.position_analysis.status==='complete' && data.events[0].position.method==='auto'")
         page.locator('#liveTab').click()
         page.locator('#cameraButton').click()
         page.wait_for_function('stream!==null && video.readyState>=2')
         select_hoop(page)
         page.locator('#startLiveButton').click()
-        page.wait_for_function("tracker?.events.some(e=>e.result==='make')",timeout=15000)
+        page.wait_for_function("tracker?.events.some(e=>e.result==='make' && e.time>1)",timeout=15000)
         page.locator('#stopButton').click()
         page.wait_for_function("!document.querySelector('#downloadRecording').hidden")
+        page.wait_for_function('!running && !loading && !positionScan',timeout=30000)
         live_counts=page.evaluate('stats(data.events)')
         assert live_counts['make']>=1,live_counts
         assert page.evaluate('stream===null && recordedBlob.size>1000')
+        assert page.evaluate("data.setup.completed && data.courtCalibration.pairs.length===4 && data.events.some(e=>e.position?.method==='auto')"),page.evaluate('({analysis:data.position_analysis,events:data.events.map(e=>({time:e.time,position:e.position,status:e.location_status})),duration:data.duration,mediaDuration:video.duration})')
         page.screenshot(path=str(OUT/'pages-desktop.png'),full_page=True)
         mobile=browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
         phone=mobile.new_page()
