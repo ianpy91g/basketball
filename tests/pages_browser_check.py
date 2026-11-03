@@ -21,10 +21,13 @@ def select_hoop(page):
     page.locator('#liveCalibrateButton' if page.evaluate("mode==='live'") else '#calibrateButton').click()
     box = page.locator('#overlay').bounding_box()
     dims = page.evaluate('[overlay.width,overlay.height]')
-    # Fixture is the same 16:9 view, scaled by Chrome to its chosen stream size.
-    scale = dims[0]/960
+    # The video and overlay are letterboxed together in the fixed review panel.
+    image_scale=min(box['width']/dims[0],box['height']/dims[1])
+    left=box['x']+(box['width']-dims[0]*image_scale)/2
+    top=box['y']+(box['height']-dims[1]*image_scale)/2
+    source_scale = dims[0]/960
     def point(x, y):
-        return box['x']+x*scale/dims[0]*box['width'], box['y']+y*scale/dims[1]*box['height']
+        return left+x*source_scale*image_scale,top+y*source_scale*image_scale
     page.mouse.move(*point(48,130))
     page.mouse.down()
     page.mouse.move(*point(110,156), steps=8)

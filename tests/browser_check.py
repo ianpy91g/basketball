@@ -28,6 +28,8 @@ with sync_playwright() as p:
     page.locator('#shotRows select').nth(1).select_option('unknown')
     assert page.locator('#makes').inner_text() == '11'
     assert page.locator('#unknowns').inner_text() == '1'
+    if not page.locator('#sessionSummary').evaluate('(el)=>el.open'):
+        page.locator('#sessionSummary > summary').click()
     with page.expect_download() as pending:
         page.locator('#exportCsv').click()
     download = pending.value
@@ -35,6 +37,8 @@ with sync_playwright() as p:
     assert '待確認' in (OUT/'browser-export.csv').read_text(encoding='utf-8-sig')
     page.reload()
     page.wait_for_function("document.querySelector('#attempts').textContent==='17'")
+    if not page.locator('#sessionSummary').evaluate('(el)=>el.open'):
+        page.locator('#sessionSummary > summary').click()
     page.locator('.history-item').first.click()
     assert page.locator('#unknowns').inner_text() == '1'
     # Camera path: browser permission, calibration, inference, recording and replay.

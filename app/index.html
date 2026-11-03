@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#101914">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="投籃簿">
-  <meta name="description" content="固定手機，紀錄每次練投的進球、未進與命中率。影像在你的裝置內分析。">
-  <title>投籃簿｜練投分析</title>
+  <meta name="description" content="影片與逐球清單同畫面回看，支援單球循環、依序播放及投籃統計。">
+  <title>投籃簿｜逐球回看</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
   <link rel="stylesheet" href="styles.css">
@@ -15,25 +15,41 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="./"><span class="brand-icon">◉</span> 投籃簿<span class="beta">實驗版 v2.1</span></a><span class="local-label"><i></i> 影片留在你的裝置與本機電腦</span></header>
+  <header class="topbar"><a class="brand" href="./"><span class="brand-icon">◉</span> 投籃簿<span class="beta">實驗版 v2.2</span></a><span class="local-label"><i></i> 影片留在你的裝置與本機電腦</span></header>
   <main>
-    <section class="heading"><div><p class="eyebrow">YOUR NEXT SHOT STARTS HERE</p><h1>專心投球，<span>留下每一球。</span></h1><p class="subtitle">匯入練投影片，或架好相機即時計數。回看、確認，再看見自己的進步。</p></div><div class="session-mark"><span>SESSION</span><strong id="sessionDate">—</strong></div></section>
-    <nav class="tabs" aria-label="分析模式"><button class="tab active" id="fileTab" aria-selected="true">▣ &nbsp;影片分析</button><button class="tab" id="liveTab" aria-selected="false">◉ &nbsp;即時練投</button><span>固定鏡頭 · 單人 · 單一籃球</span></nav>
-    <div class="workspace">
-      <section class="viewer-panel">
-        <div class="panel-top"><div><span class="dot"></span><strong id="sourceName">選擇一段練投影片</strong></div><span id="sourceMeta">尚未載入</span></div>
-        <div class="stage" id="stage"><video id="video" playsinline muted controls preload="metadata"></video><canvas id="overlay" aria-label="拖曳框選籃圈"></canvas><div class="empty" id="empty"><span>◎</span><h2>從一段練投開始</h2><p>讓籃圈與球的飛行路徑<br>清楚出現在畫面內。</p></div><div class="stage-label" id="stageLabel" hidden></div></div>
-        <div class="toolbar" id="fileTools"><label class="button primary file-label">＋ 匯入影片<input id="fileInput" type="file" accept="video/*,.mts,.m2ts,.mov,.mp4,.m4v,.webm"></label><button class="button" id="sampleButton" hidden>使用資料夾測試影片</button><button class="button" id="calibrateButton" disabled>框選籃圈</button><button class="button accent" id="analyzeButton" disabled>開始分析 →</button></div>
-        <div class="toolbar" id="liveTools" hidden><button class="button primary" id="cameraButton">開啟後置相機</button><button class="button" id="liveCalibrateButton" disabled>框選籃圈</button><button class="button accent" id="startLiveButton" disabled>開始練投 →</button><label class="record-label"><input type="checkbox" id="recordToggle" checked> 同時錄影</label></div>
-        <div class="run-actions" id="runActions" hidden><div><span class="pulse"></span><strong id="runLabel">分析中</strong><span id="fpsLabel"></span></div><button class="button danger" id="stopButton">結束</button></div>
-        <div class="status" role="status" aria-live="polite" id="status">先匯入影片，再框選橢圓形籃圈。不需要框整塊籃板。</div><progress id="progress" max="1" value="0" hidden></progress>
-        <div class="setup-notes"><span>01 <b>固定鏡頭</b></span><span>02 <b>框選籃圈</b></span><span>03 <b>分析後複核</b></span></div>
-      </section>
-      <aside class="stats-panel"><div class="stats-title"><span class="eyebrow">WORKOUT STATS</span><span id="resultState">等待影片</span></div><div class="accuracy"><strong id="accuracy">—</strong><span>%</span></div><p class="accuracy-label">已判定球數的命中率</p><div class="accuracy-track"><div id="accuracyBar"></div></div><div class="stats-grid"><div><span>紀錄出手</span><strong id="attempts">0</strong></div><div class="make-stat"><span>進球</span><strong id="makes">0</strong></div><div><span>未進</span><strong id="misses">0</strong></div><div class="pending-stat"><span>待確認</span><strong id="unknowns">0</strong></div></div><div class="review-note"><span>↗</span><p>自動結果可修正。看不清楚的球保留為「待確認」，不直接算未進。</p></div><p class="coverage-note">只記錄偵測到的到框事件。畫面外或遠離籃框的出手可能漏算，可在下方補記。</p><div class="export-actions"><button id="exportCsv" disabled>↓ 匯出 CSV</button><button id="exportJson" disabled>↓ 匯出 JSON</button><a id="downloadRecording" hidden>↓ 儲存錄影</a></div></aside>
+    <section class="heading"><div><h1>逐球回看</h1><p class="subtitle">影片與逐球紀錄一起看，專心觀察每次出手。</p></div><div class="session-mark"><span>SESSION</span><strong id="sessionDate">—</strong></div></section>
+    <div class="setup-area">
+      <nav class="tabs" aria-label="分析模式"><button class="tab active" id="fileTab" aria-selected="true">影片分析</button><button class="tab" id="liveTab" aria-selected="false">即時練投</button><span>固定鏡頭 · 單人練投</span></nav>
+      <div class="toolbar" id="fileTools"><label class="button primary file-label">＋ 匯入影片<input id="fileInput" type="file" accept="video/*,.mts,.m2ts,.mov,.mp4,.m4v,.webm"></label><button class="button" id="sampleButton" hidden>載入範例</button><button class="button" id="calibrateButton" disabled>框選籃圈</button><button class="button accent" id="analyzeButton" disabled>開始分析 →</button></div>
+      <div class="toolbar" id="liveTools" hidden><button class="button primary" id="cameraButton">開啟後置相機</button><button class="button" id="liveCalibrateButton" disabled>框選籃圈</button><button class="button accent" id="startLiveButton" disabled>開始練投 →</button><label class="record-label"><input type="checkbox" id="recordToggle" checked> 同時錄影</label></div>
+      <div class="run-actions" id="runActions" hidden><div><span class="pulse"></span><strong id="runLabel">分析中</strong><span id="fpsLabel"></span></div><button class="button danger" id="stopButton">結束</button></div>
     </div>
-    <section class="review-panel"><div class="review-heading"><div><p class="eyebrow">SHOT BY SHOT</p><h2>每一球，都能回看。</h2></div><div class="review-controls"><span id="reviewCount">尚無紀錄</span><button class="button small" id="addShot" disabled>＋ 補記一球</button></div></div><div class="shot-strip" id="shotStrip"><p>分析完成後，點選球號跳至該次投籃。</p></div><div class="table-wrap"><table><thead><tr><th>球號</th><th>到框時間</th><th>結果 / 修正</th><th>判定線索</th><th>人工確認</th></tr></thead><tbody id="shotRows"></tbody></table></div><div class="review-empty" id="reviewEmpty">你的第一份練投紀錄，會出現在這裡。</div></section>
-    <section class="history-panel"><h2>這個瀏覽器的練習紀錄</h2><div id="historyList"><p>完成分析後，統計與修正會自動保存在此瀏覽器；影片請另外儲存。</p></div></section>
-    <footer><strong>投籃簿</strong><p>固定鏡頭辨識原型 · 尚未驗證跨球場準確率 · 拍攝中請保持頁面開啟</p><span>ONE SHOT AT A TIME.</span></footer>
+    <div class="workspace" id="workspace">
+      <section class="viewer-panel" aria-label="影片與單球播放">
+        <div class="panel-top"><div><span class="dot"></span><strong id="sourceName">選擇一段練投影片</strong></div><span id="sourceMeta">尚未載入</span></div>
+        <div class="stage" id="stage"><video id="video" playsinline muted controls preload="metadata"></video><canvas id="overlay" aria-label="拖曳框選籃圈"></canvas><div class="empty" id="empty"><span>◎</span><h2>從一段練投開始</h2><p>匯入影片並框選籃圈，<br>分析後點選旁邊的球號回看。</p></div><div class="stage-label" id="stageLabel" hidden></div></div>
+        <div class="playback-bar" id="playbackControls">
+          <div class="clip-info"><strong id="activeShotLabel" aria-live="polite">選一球開始回看</strong><span id="clipRange"></span><span class="trajectory-key"><i></i>球的軌跡</span></div>
+          <div class="playback-actions"><button class="button transport" id="previousShot" aria-label="上一球" disabled>上一球</button><button class="button primary transport" id="togglePlayback" disabled>播放</button><button class="button transport" id="nextShot" aria-label="下一球" disabled>下一球</button><label class="playback-mode-label"><span class="sr-only">播放方式</span><select id="playbackMode" aria-label="播放方式" disabled><option value="loop">單球循環</option><option value="sequence">依序播放</option><option value="once">單球一次</option></select></label></div>
+        </div>
+        <div class="status" role="status" aria-live="polite" id="status">先匯入影片，再框選橢圓形籃圈。</div><progress id="progress" max="1" value="0" hidden></progress>
+      </section>
+      <aside class="review-panel" aria-label="逐球清單">
+        <div class="review-heading"><div><p class="eyebrow">SHOT BY SHOT</p><h2>逐球紀錄</h2></div><div class="review-controls"><span id="reviewCount">尚無紀錄</span><button class="button small" id="addShot" disabled>＋ 補記</button></div></div>
+        <div class="shot-strip" id="shotStrip" aria-label="球號快速選擇"><p>分析完成後，在這裡選球回看。</p></div>
+        <div class="shot-list" id="shotRows" role="list" aria-label="逐球結果與修正"></div>
+        <div class="review-empty" id="reviewEmpty">分析完成後，每球紀錄會出現在這裡。</div>
+      </aside>
+    </div>
+    <details class="summary-panel" id="sessionSummary"><summary><span>整體統計、匯出與練習紀錄</span><span id="summaryBrief">需要時再展開查看</span></summary>
+      <section class="stats-panel" aria-label="整體統計">
+        <div class="accuracy-panel"><div class="stats-title"><span class="eyebrow">WORKOUT STATS</span><span id="resultState">等待影片</span></div><div class="accuracy"><strong id="accuracy">—</strong><span>%</span></div><p class="accuracy-label">已判定球數的命中率</p><div class="accuracy-track"><div id="accuracyBar"></div></div></div>
+        <div class="stats-grid"><div><span>紀錄出手</span><strong id="attempts">0</strong></div><div class="make-stat"><span>進球</span><strong id="makes">0</strong></div><div><span>未進</span><strong id="misses">0</strong></div><div class="pending-stat"><span>待確認</span><strong id="unknowns">0</strong></div></div>
+        <div class="stats-notes"><p class="coverage-note">自動結果請逐球複核。畫面外或未被偵測到的出手可補記；待確認不直接算未進。</p><div class="export-actions"><button id="exportCsv" disabled>↓ 匯出 CSV</button><button id="exportJson" disabled>↓ 匯出 JSON</button><a id="downloadRecording" hidden>↓ 儲存錄影</a></div></div>
+      </section>
+      <section class="history-panel"><h2>這個瀏覽器的練習紀錄</h2><div id="historyList"><p>統計與修正保存在此瀏覽器；影片請另外儲存。</p></div></section>
+    </details>
+    <footer><strong>投籃簿</strong><p>固定鏡頭辨識原型 · 拍攝中請保持頁面開啟</p></footer>
   </main>
 </body>
 </html>
