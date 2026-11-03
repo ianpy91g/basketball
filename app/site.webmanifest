@@ -1,0 +1,14 @@
+{
+  "id": "./",
+  "name": "投籃簿",
+  "short_name": "投籃簿",
+  "lang": "zh-Hant",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#101914",
+  "background_color": "#101713",
+  "icons": [
+    {"src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}
