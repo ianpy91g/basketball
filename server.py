@@ -2,17 +2,25 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import mimetypes
+import os
 import re
+import socket
 import ssl
 import threading
 import uuid
+import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+from urllib.request import urlopen
 
-from analyze import ROOT, analyze_video, convert_video, save_results
+import analyze
+
+ROOT = analyze.ROOT
+SERVER_VERSION = '2.1'
 
 UPLOADS = ROOT/'artifacts/uploads'
 JOBS = {}
@@ -25,16 +33,20 @@ def run_job(job_id, mode, hoop=None):
     job = JOBS[job_id]
     try:
         with WORKER:
+            # Reload updated analysis code between jobs, instead of retaining
+            # functions imported before the user downloaded an update.
+            engine = importlib.reload(analyze)
+            job['analysis_version'] = engine.ANALYSIS_VERSION
             if mode == 'convert':
                 job.update(status='converting', progress=0)
-                convert_video(job['input'], job['directory']/'video.mp4')
+                engine.convert_video(job['input'], job['directory']/'video.mp4')
                 job.update(status='ready', progress=1)
             else:
                 job.update(status='analyzing', progress=0)
-                result = analyze_video(job['directory']/'video.mp4', hoop,
+                result = engine.analyze_video(job['directory']/'video.mp4', hoop,
                                        lambda p: job.update(progress=p))
                 result['source'] = job['filename']
-                save_results(result, job['directory'], 'video.mp4')
+                engine.save_results(result, job['directory'], 'video.mp4')
                 job.update(status='complete', progress=1)
     except Exception as exc:
         job.update(status='error', error=str(exc))
@@ -53,13 +65,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlsplit(self.path).path
         if path == '/api/health':
-            return self.json({'status': 'ok', 'sample': (ROOT/'artifacts/analysis.json').exists()})
+            return self.json({'status': 'ok', 'app': 'shotbook-local',
+                              'server_version': SERVER_VERSION,
+                              'analysis_version': analyze.ANALYSIS_VERSION,
+                              'pid': os.getpid(),
+                              'sample': (ROOT/'artifacts/analysis.json').exists()})
         match = re.fullmatch(r'/api/jobs/([a-f0-9]{32})', path)
         if match:
             job = JOBS.get(match[1])
             if not job:
                 return self.json({'error': '找不到工作'}, 404)
-            return self.json({k: job[k] for k in ('status', 'progress', 'filename', 'error') if k in job})
+            return self.json({k: job[k] for k in ('status', 'progress', 'filename', 'error', 'analysis_version') if k in job})
         sample = {'/sample/video.mp4': 'source.mp4', '/sample/analysis.json': 'analysis.json',
                   '/sample/evidence.jpg': 'evidence.jpg', '/sample/shots.csv': 'shots.csv'}
         if path in sample:
@@ -68,7 +84,8 @@ class Handler(BaseHTTPRequestHandler):
         if match and match[1] in JOBS:
             return self.file(JOBS[match[1]]['directory']/match[2])
         assets = {'/': 'index.html', '/index.html': 'index.html', '/styles.css': 'styles.css',
-                  '/app.js': 'app.js', '/tracker.js': 'tracker.js'}
+                  '/app.js': 'app.js', '/tracker.js': 'tracker.js',
+                  '/icon.svg': 'icon.svg', '/site.webmanifest': 'site.webmanifest'}
         if path in assets:
             return self.file(ROOT/'app'/assets[path])
         return self.json({'error': '找不到頁面'}, 404)
@@ -98,6 +115,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
         self.send_header('Content-Length', str(end-start+1))
         self.send_header('Accept-Ranges', 'bytes')
+        if path.suffix.lower() in {'.html', '.js', '.css', '.json', '.svg', '.webmanifest', '.csv'}:
+            self.send_header('Cache-Control', 'no-store')
         if partial:
             self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
         self.end_headers()
@@ -171,15 +190,45 @@ class Handler(BaseHTTPRequestHandler):
         return self.json({'error': '找不到操作'}, 404)
 
 
+class AppServer(ThreadingHTTPServer):
+    # Windows SO_REUSEADDR can allow multiple listeners on the same address.
+    allow_reuse_address = os.name != 'nt'
+
+    def server_bind(self):
+        if os.name == 'nt' and hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--cert', type=Path)
     parser.add_argument('--key', type=Path)
+    parser.add_argument('--open-browser', action='store_true')
     args = parser.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
-    scheme = 'http'
+    scheme = 'https' if args.cert or args.key else 'http'
+    browser_host = '127.0.0.1' if args.host == '0.0.0.0' else args.host
+    local_url = f'{scheme}://{browser_host}:{args.port}'
+    try:
+        server = AppServer((args.host, args.port), Handler)
+    except OSError as exc:
+        try:
+            with urlopen(local_url+'/api/health', timeout=2) as response:
+                existing = json.load(response)
+            if existing.get('app') == 'shotbook-local' and existing.get('analysis_version', 0) >= 2:
+                print(f'本機服務已在執行：{local_url}', flush=True)
+                if args.open_browser:
+                    webbrowser.open(local_url)
+                raise SystemExit(0)
+            if existing.get('status') == 'ok':
+                print('這個網址仍有舊版本機服務。請關閉原本 start.cmd 的視窗，再重新啟動。', flush=True)
+                raise SystemExit(1)
+        except (OSError, ValueError):
+            pass
+        print(f'無法啟動本機服務，請確認連接埠 {args.port} 未被其他程式使用：{exc}', flush=True)
+        raise SystemExit(1)
     if args.cert or args.key:
         if not (args.cert and args.key):
             parser.error('--cert 和 --key 必須一起指定')
@@ -187,7 +236,9 @@ if __name__ == '__main__':
         context.load_cert_chain(args.cert, args.key)
         server.socket = context.wrap_socket(server.socket, server_side=True)
         scheme = 'https'
-    print(f'Basketball prototype: {scheme}://{args.host}:{args.port}', flush=True)
+    print(f'投籃簿本機服務 v{SERVER_VERSION} / 分析引擎 v{analyze.ANALYSIS_VERSION}: {local_url}', flush=True)
+    if args.open_browser:
+        webbrowser.open(local_url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

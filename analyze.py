@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parent
+ANALYSIS_VERSION = 2
 
 
 def convert_video(source: Path, output: Path) -> None:
@@ -90,7 +91,7 @@ def analyze_video(video: Path, hoop: dict, progress=None, *, candidate_output: P
     events = json.loads(classified.stdout)['events']
     totals = {status: sum(e['result'] == status for e in events) for status in ('make', 'miss', 'unknown')}
     decided = totals['make']+totals['miss']
-    return {'version': 2, 'method': 'fixed-camera-color-motion-v2', 'source': video.name,
+    return {'version': ANALYSIS_VERSION, 'method': f'fixed-camera-color-motion-v{ANALYSIS_VERSION}', 'source': video.name,
             'width': width, 'height': height, 'fps': fps, 'duration': index/fps, 'hoop': hoop,
             'events': events, 'summary': {'attempts_detected': len(events), **totals,
             'resolved_accuracy': round(totals['make']/decided*100, 2) if decided else None},

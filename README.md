@@ -36,6 +36,8 @@ python server.py
 
 開啟 <http://127.0.0.1:8765>，或在 Windows 雙擊 `start.cmd`。本機版本可匯入最多 2GB 的 MTS、M2TS、MP4、MOV、M4V 或 WebM，轉檔及輸出存於被 Git 排除的 `artifacts/`。
 
+本機服務 v2.1 會在每次工作開始前重新載入分析引擎，並禁止同一網址重複啟動服務。頁面會顯示實際的本機引擎版本。從舊版升級時，第一次必須關閉原本的 `start.cmd` 視窗再重新啟動；只重新整理網頁不會更新已經載入記憶體的舊 Python 程式。偵測到 v1 服務時，新頁面會提示重啟，並暫時使用瀏覽器分析 MP4 / MOV。
+
 電腦的 localhost 可測試相機。iPhone 請用 GitHub Pages 的 HTTPS 網址；普通區網 HTTP 位址不能開啟 Safari 相機。
 
 ## 開發與發布

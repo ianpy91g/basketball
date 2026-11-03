@@ -9,6 +9,8 @@ let mode='file', backend=false, hoop=null, data=null, jobId=null, running=false,
 let tracker=null, detector=null, stream=null, recorder=null, recordedBlob=null;
 let sourceUrl=null, recordingUrl=null, callbackId=null, generation=0, origin=0, frameTimes=[];
 let calibrating=false, dragStart=null, dragEnd=null, sessionId=null, sourceKind=null;
+let localEngineNotice='';
+const REQUIRED_ANALYSIS_VERSION=2;
 const fmt=t=>`${String(Math.floor(Math.max(0,t)/60)).padStart(2,'0')}:${Math.max(0,t%60).toFixed(1).padStart(4,'0')}`;
 const message=(text,error=false)=>{$('status').textContent=text;$('status').classList.toggle('error',error);};
 const dateLabel=()=>new Date().toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit'});
@@ -26,13 +28,15 @@ function refresh(full=true){
   $('accuracyBar').style.width=`${s.resolved_accuracy||0}%`;
   const reviewed=events.filter(e=>e.reviewed&&e.result!=='ignored').length;
   $('reviewCount').textContent=events.length?`${reviewed} / ${s.attempts_detected} 球已確認`:'尚無紀錄';
-  $('resultState').textContent=events.length?(reviewed===s.attempts_detected?'已人工確認':'自動結果 · 待複核'):'等待紀錄';
+  const finished=data?.analysis_state==='complete'||data?.analysis_state==='stopped';
+  $('resultState').textContent=events.length?(reviewed===s.attempts_detected?'已人工確認':'自動結果 · 待複核'):finished?'未偵測到投籃':'等待紀錄';
   $('exportCsv').disabled=$('exportJson').disabled=!events.length;
   $('addShot').disabled=!data||running||loading;
   $('reviewEmpty').hidden=!!events.length;
+  $('reviewEmpty').textContent=finished?'本次未辨識到投籃。請重新確認籃圈框選位置，再分析一次。':'你的第一份練投紀錄，會出現在這裡。';
   if(!full)return;
   $('shotStrip').replaceChildren();$('shotRows').replaceChildren();
-  if(!events.length){const p=document.createElement('p');p.textContent='分析完成後，點選球號跳至該次投籃。';$('shotStrip').append(p);}
+  if(!events.length){const p=document.createElement('p');p.textContent=finished?'沒有辨識到投籃；這不代表實際出手數為零。':'分析完成後，點選球號跳至該次投籃。';$('shotStrip').append(p);}
   for(const e of events){
     const chip=document.createElement('button');chip.className=`shot-chip ${e.result}`;chip.textContent=e.id;chip.title=`第 ${e.id} 球 ${fmt(e.time)} ${labels[e.result]}`;chip.onclick=()=>jump(e);$('shotStrip').append(chip);
     const tr=document.createElement('tr');
@@ -45,6 +49,14 @@ function refresh(full=true){
     const review=document.createElement('td'),box=document.createElement('input');box.type='checkbox';box.className='review-box';box.checked=e.reviewed;box.setAttribute('aria-label',`確認第 ${e.id} 球`);box.onchange=()=>{e.reviewed=box.checked;refresh(false);saveSession();};review.append(box);
     tr.append(num,time,result,reason,review);$('shotRows').append(tr);
   }
+}
+function showOutcome(completed){
+  if(!data?.events.length){
+    message('分析已結束，但沒有辨識到投籃。請只框住橢圓形籃圈，確認球清楚可見後重試；實際出手數不能據此當成零。',true);
+    return;
+  }
+  const s=stats(data.events);
+  message(`${completed?'分析完成':'已結束'}：${s.attempts_detected} 次，${s.make} 進、${s.miss} 未進、${s.unknown} 待確認。請逐球回看與複核。`);
 }
 function controls(){
   $('fileTools').hidden=mode!=='file'||running;
@@ -160,8 +172,8 @@ async function upload(file){
 $('fileInput').onchange=async e=>{
   const file=e.target.files[0];if(!file)return;e.target.value='';await cleanup();sourceKind='local';$('sourceName').textContent=file.name;video.controls=true;
   if(backend){await upload(file);return;}
-  if(/\.m[2]?ts$/i.test(file.name)){message('MTS 需先在電腦轉成 MP4。本機服務可自動轉檔；此瀏覽器頁面請匯入 MP4 / MOV。',true);return;}
-  sourceUrl=URL.createObjectURL(file);video.src=sourceUrl;video.load();message('影片已選取。請框選籃圈，再開始分析。');
+  if(/\.m[2]?ts$/i.test(file.name)){message(localEngineNotice?'偵測到舊版本機服務。MTS 轉檔需要關閉原本 start.cmd 視窗後重新啟動，或先轉成 MP4 再匯入。':'MTS 需先在電腦轉成 MP4。本機服務可自動轉檔；此瀏覽器頁面請匯入 MP4 / MOV。',true);return;}
+  sourceUrl=URL.createObjectURL(file);video.src=sourceUrl;video.load();message(`${localEngineNotice?'目前改用新版瀏覽器引擎分析。':'影片已選取。'}請框選籃圈，再開始分析。`);
 };
 
 async function startServerAnalysis(){
@@ -169,7 +181,12 @@ async function startServerAnalysis(){
   try{
     const response=await fetch(`/api/jobs/${jobId}/analyze`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({hoop})});
     if(!response.ok)throw Error((await response.json()).error);await pollJob(jobId,'complete');
-    const result=await fetch(`/media/${jobId}/analysis.json`);data=await result.json();sessionId=crypto.randomUUID();refresh();saveSession();message('分析完成。請逐球回看、修正並勾選確認。');
+    const result=await fetch(`/media/${jobId}/analysis.json`,{cache:'no-store'});
+    if(!result.ok)throw Error('無法載入分析結果，請重新匯入影片後再分析。');
+    const analyzed=await result.json();
+    if(!Array.isArray(analyzed.events))throw Error('本機回傳的分析結果不完整，請重新啟動 start.cmd。');
+    if(Number(analyzed.version||1)<REQUIRED_ANALYSIS_VERSION)throw Error('這次結果仍來自舊版 v1 引擎。請關閉原本 start.cmd 視窗後重新啟動，再匯入影片。');
+    data={...analyzed,analysis_state:'complete'};sessionId=crypto.randomUUID();refresh();saveSession();showOutcome(true);
   }catch(e){message(e.message,true);}finally{loading=false;$('progress').hidden=true;controls();}
 }
 $('analyzeButton').onclick=()=>jobId?startServerAnalysis():start('file');
@@ -235,7 +252,7 @@ async function stop(ended=false){
   running=false;generation++;
   if(video.cancelVideoFrameCallback)video.cancelVideoFrameCallback(callbackId);else cancelAnimationFrame(callbackId);
   // An unfinished last shot stays unknown unless its make evidence is already complete.
-  tracker.finish(true);data.events=tracker.events;data.duration=mode==='live'?Math.max(0,video.currentTime-origin):video.duration;
+  tracker.finish(true);data.events=tracker.events;data.analysis_state=ended?'complete':'stopped';data.duration=mode==='live'?Math.max(0,video.currentTime-origin):video.duration;
   if(mode==='live'){
     if(recorder&&recorder.state!=='inactive'){
       const stopped=new Promise(resolve=>recorder.addEventListener('stop',resolve,{once:true}));recorder.stop();await stopped;
@@ -243,7 +260,7 @@ async function stop(ended=false){
     if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
   }else video.pause();
   video.controls=true;$('stageLabel').hidden=true;$('progress').hidden=true;refresh();saveSession();controls();
-  message(!data.events.length?'未偵測到投籃。請確認籃圈框選位置、球色和影像清晰度；這不代表實際出手數為零。':ended?'分析完成。請逐球回看、修正並確認結果。':'已結束。最後一球若缺少完整軌跡，會保留為待確認。');draw();
+  showOutcome(ended);draw();
 }
 $('stopButton').onclick=()=>stop(false);
 async function jump(e){
@@ -283,6 +300,21 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&running){s
     message('固定手機後開啟後置相機，再框選籃圈。影像在這台裝置內處理；匯入影片請使用 MP4 / MOV。');
     controls();return;
   }
-  try{const r=await fetch('/api/health');if(r.ok){const health=await r.json();backend=health.status==='ok';$('sampleButton').hidden=!health.sample;if(health.sample)await loadSample();}}catch{}
+  try{
+    const r=await fetch('/api/health',{cache:'no-store'});
+    if(r.ok){
+      const health=await r.json();
+      backend=health.status==='ok'&&Number(health.analysis_version||1)>=REQUIRED_ANALYSIS_VERSION;
+      $('sampleButton').hidden=!health.sample;
+      if(health.sample)await loadSample();
+      const label=document.querySelector('.local-label'),dot=document.createElement('i');
+      if(backend){label.replaceChildren(dot,document.createTextNode(`本機分析引擎 v${health.analysis_version} · 影像留在這台電腦`));}
+      else if(health.status==='ok'){
+        localEngineNotice='本機仍是舊版 v1 服務。請關閉原本 start.cmd 視窗後重新啟動；MP4 / MOV 暫時改由新版瀏覽器引擎分析。';
+        label.replaceChildren(dot,document.createTextNode('舊版本機服務 · 已切換瀏覽器分析'));
+        message(localEngineNotice,true);
+      }
+    }
+  }catch{}
   controls();
 })();
