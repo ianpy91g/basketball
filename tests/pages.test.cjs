@@ -11,6 +11,7 @@ const base=new URL('https://example.github.io/basketball/');
 for(const [,link] of html.matchAll(/(?:src|href)="([^"]+)"/g)){
   if(link==='./')continue;
   const url=new URL(link,base);
+  if(url.pathname.endsWith('.js'))assert.match(url.search,/^\?v=[a-f0-9]{12}$/);
   assert.ok(url.pathname.startsWith('/basketball/'),link);
   assert.ok(fs.existsSync(path.join(dir,decodeURIComponent(url.pathname.slice('/basketball/'.length)))),link);
 }

@@ -29,7 +29,7 @@ def convert_video(source: Path, output: Path) -> None:
         raise RuntimeError('影片轉檔失敗：' + result.stderr.decode('utf-8', errors='replace')[-800:])
 
 
-def analyze_video(video: Path, hoop: dict, progress=None) -> dict:
+def analyze_video(video: Path, hoop: dict, progress=None, *, candidate_output: Path | None = None) -> dict:
     cap = cv2.VideoCapture(str(video))
     fps = cap.get(cv2.CAP_PROP_FPS)
     width, height = int(cap.get(3)), int(cap.get(4))
@@ -56,8 +56,9 @@ def analyze_video(video: Path, hoop: dict, progress=None) -> dict:
             background = gray.astype(np.float32)
         diff = cv2.absdiff(gray, cv2.convertScaleAbs(background))
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, np.array([0, 65, 45]), np.array([28, 255, 255]))
-        mask[diff < 22] = 0
+        mask = (cv2.inRange(hsv, np.array([0, 55, 20]), np.array([30, 255, 255])) |
+                cv2.inRange(hsv, np.array([165, 55, 20]), np.array([180, 255, 255])))
+        mask[diff < 12] = 0
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         candidates = []
@@ -78,6 +79,8 @@ def analyze_video(video: Path, hoop: dict, progress=None) -> dict:
     cap.release()
     if not index:
         raise RuntimeError('影片沒有可解碼影格')
+    if candidate_output:
+        candidate_output.write_text(json.dumps({'hoop': hoop, 'frames': frames}), encoding='utf-8')
     node = shutil.which('node')
     if not node:
         raise RuntimeError('找不到 Node.js，無法執行共用判定規則')
@@ -87,12 +90,12 @@ def analyze_video(video: Path, hoop: dict, progress=None) -> dict:
     events = json.loads(classified.stdout)['events']
     totals = {status: sum(e['result'] == status for e in events) for status in ('make', 'miss', 'unknown')}
     decided = totals['make']+totals['miss']
-    return {'version': 1, 'method': 'fixed-camera-color-motion-v1', 'source': video.name,
+    return {'version': 2, 'method': 'fixed-camera-color-motion-v2', 'source': video.name,
             'width': width, 'height': height, 'fps': fps, 'duration': index/fps, 'hoop': hoop,
             'events': events, 'summary': {'attempts_detected': len(events), **totals,
             'resolved_accuracy': round(totals['make']/decided*100, 2) if decided else None},
             'limitations': ['只統計偵測到球接近籃框的事件，畫面外或遠離籃框的投籃可能漏算。',
-                            '固定鏡頭、單一籃球、橘褐色球與清楚籃網為本原型的使用條件。',
+                            '固定鏡頭、單一橘褐色或深紅色籃球與清楚籃網為本原型的使用條件。',
                             '自動判定需逐球複核；目前未以獨立標註資料集驗證準確率。',
                             '時間碼以轉檔後影片的第一個影格為零；不包含音訊起點偏移。']}
 
@@ -123,7 +126,7 @@ def save_results(result: dict, directory: Path, video_name: str = 'source.mp4') 
 <p>點時間回看該球前後。修正與補記請使用本機原型介面。 · <a href="shots.csv">下載逐球 CSV</a> · <a href="analysis.json">原始分析 JSON</a></p>
 <table><thead><tr><th>球號</th><th>到框時間</th><th>自動結果</th><th>線索</th></tr></thead><tbody>{rows}</tbody></table>
 <script>function jump(t){{const v=document.getElementById('v');v.currentTime=Math.max(0,t-.8);v.play();v.scrollIntoView({{behavior:'smooth',block:'center'}});}}</script>
-<p>時間以轉檔後影片為準。其他影片需重新標定籃圈；目前為單人、單球、固定鏡頭與橘褐色球的辨識原型。</p></html>'''
+<p>時間以轉檔後影片為準。其他影片需重新標定籃圈；目前為單人、單球、固定鏡頭與橘褐色或深紅色球的辨識原型。</p></html>'''
     (directory/'report.html').write_text(report, encoding='utf-8')
 
 
@@ -155,8 +158,9 @@ if __name__ == '__main__':
     parser.add_argument('--proxy', type=Path, default=ROOT/'artifacts/source.mp4')
     parser.add_argument('--out', type=Path, default=ROOT/'artifacts')
     parser.add_argument('--hoop', required=True, help='轉檔影片的籃圈 left,top,right,bottom 像素座標')
+    parser.add_argument('--reuse-proxy', action='store_true', help='明確重用已存在、且已確認屬於這支原片的 MP4')
     args = parser.parse_args()
-    if not args.proxy.exists():
+    if not args.reuse_proxy or not args.proxy.exists():
         convert_video(args.source, args.proxy)
     hoop = dict(zip(('left', 'top', 'right', 'bottom'), map(float, args.hoop.split(','))))
     result = analyze_video(args.proxy, hoop)

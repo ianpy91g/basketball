@@ -61,7 +61,7 @@ function controls(){
 }
 function newData(name){
   sessionId=crypto.randomUUID?crypto.randomUUID():String(Date.now());
-  data={version:1,source:name,width:scratch.width,height:scratch.height,hoop,method:'browser-color-motion-v1',events:[],created_at:new Date().toISOString()};
+  data={version:2,source:name,width:scratch.width,height:scratch.height,hoop,method:'browser-color-motion-v2',events:[],created_at:new Date().toISOString()};
   refresh();
 }
 function resize(){
@@ -243,7 +243,7 @@ async function stop(ended=false){
     if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
   }else video.pause();
   video.controls=true;$('stageLabel').hidden=true;$('progress').hidden=true;refresh();saveSession();controls();
-  message(ended?'分析完成。請逐球回看、修正並確認結果。':'已結束。最後一球若缺少完整軌跡，會保留為待確認。');draw();
+  message(!data.events.length?'未偵測到投籃。請確認籃圈框選位置、球色和影像清晰度；這不代表實際出手數為零。':ended?'分析完成。請逐球回看、修正並確認結果。':'已結束。最後一球若缺少完整軌跡，會保留為待確認。');draw();
 }
 $('stopButton').onclick=()=>stop(false);
 async function jump(e){

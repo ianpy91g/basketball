@@ -27,9 +27,20 @@
       this.lastTime = t;
       const w = this.w;
       let options = candidates.filter(p => p.area >= w*w*.018 && p.area <= w*w*.8);
+      if (!this.active) {
+        // While waiting for a shot, follow objects in the approach region rather
+        // than hands or faces elsewhere in the frame. An active shot can still
+        // leave this region so its rebound/exit remains observable.
+        const inApproach = q=>q.y<=this.cy+w*.45 && Math.abs(q.x-this.cx)<=w*2.7;
+        options=options.filter(inApproach);
+        if (this.lastPoint && !inApproach(this.lastPoint)) {
+          this.lastPoint=null;this.history=[];
+        }
+      }
       if (this.lastPoint && t - this.lastPoint.t < .18) {
         const old = this.lastPoint;
-        options = options.filter(p => Math.hypot(p.x-old.x, p.y-old.y) < w * 2.4);
+        options = options.filter(p => Math.hypot(p.x-old.x, p.y-old.y) < w * 2.4 &&
+          (this.active || (p.area>=old.area/8 && p.area<=old.area*8)));
         options.sort((a,b) => Math.hypot(a.x-old.x,a.y-old.y) - Math.hypot(b.x-old.x,b.y-old.y));
       } else {
         options.sort((a,b) => Math.abs(a.area-w*w*.13) - Math.abs(b.area-w*w*.13));
@@ -43,10 +54,21 @@
       if (!this.active && p && t >= this.cooldown && this.history.length >= 3) {
         const past = this.history.filter(q => t-q.t >= .055 && t-q.t <= .45);
         const fromAbove = past.some(q => q.y < this.cy-w*.45 && p.y-q.y > w*.2);
-        const near = Math.abs(p.x-this.cx) <= w*.85 && p.y >= this.cy-w*.5 && p.y <= this.cy+w*.42;
-        if (near && fromAbove) {
+        // Two coherent descending steps prevent an ascending rebound from being
+        // joined to a stationary red rim fragment after the ball disappears.
+        const recent = this.history.filter(q=>t-q.t<=.2);
+        let descendingSteps = 0;
+        for (let i=1;i<recent.length;i++) {
+          const before=recent[i-1], now=recent[i], dy=now.y-before.y;
+          if (now.t-before.t>.14 || dy < -w*.025) descendingSteps=0;
+          else if (dy>w*.025) descendingSteps++;
+        }
+        // A rim hit can turn upward between two frames, before the center reaches
+        // the rim plane. Include that approach band for low-frame-rate video.
+        const near = Math.abs(p.x-this.cx) <= w*.85 && p.y >= this.cy-w*.9 && p.y <= this.cy+w*.42;
+        if (near && fromAbove && descendingSteps>=2) {
           this.active = {start: t, points: this.history.slice(), lastSeen: t};
-          this.cooldown = t+2.0;
+          this.cooldown = t+.65;
         }
       } else if (this.active && p) {
         this.active.points.push(p);
@@ -63,18 +85,14 @@
       this.active = null;
       const w = this.w, cx = this.cx, cy = this.cy;
       const after = a.points.filter(p => p.t >= a.start);
-      const core = after.filter(p => p.x >= this.hoop.left+w*.08 && p.x <= this.hoop.right-w*.2 && p.y >= cy+w*.23 && p.y <= cy+w*.95);
+      const core = after.filter(p => p.x >= this.hoop.left-w*.1 && p.x <= this.hoop.right-w*.16 && p.y >= cy+w*.1 && p.y <= cy+w*1.05);
       let result = 'unknown', reason = '球的後續軌跡不足，請回看確認';
       const span = core.length ? core[core.length-1].t-core[0].t : 0;
       const drops = core.length ? Math.max(...core.map(p=>p.y))-Math.min(...core.map(p=>p.y)) : 0;
-      const downThroughNet = core.length >= 4 && span >= .15 && drops >= w*.28 && core.some(p=>p.y > cy+w*.63);
-      const contact = after.findIndex(p => Math.abs(p.x-cx)<w*.7 && p.y>cy-w*.4);
-      let rebound = false;
-      if (contact >= 0) {
-        const touch = after[contact];
-        rebound = after.slice(contact+1).some(p=>p.t-touch.t < .8 && p.y < touch.y-w*.28);
-        rebound ||= after.slice(contact+1).some(p=>p.t-touch.t < .7 && Math.abs(p.x-cx)>w*1.65 && p.y < cy+w*.3);
-      }
+      const downThroughNet = core.length >= 3 && span >= .065 && drops >= w*.25 && core.some(p=>p.y > cy+w*.5) && core[core.length-1].y-core[0].y > w*.22;
+      const contacts = after.filter(p=>Math.abs(p.x-cx)<w*.9 && p.y>cy-w*.9 && p.y<cy+w*.45);
+      let rebound = contacts.some(touch=>after.some(p=>p.t>touch.t && p.t-touch.t<.65 && p.y<touch.y-w*.22));
+      rebound ||= contacts.some(touch=>after.some(p=>p.t>touch.t && p.t-touch.t<.7 && Math.abs(p.x-cx)>w*1.65 && p.y<cy+w*.3));
       let bypass = false;
       const line = cy+w*.32;
       for (let i=1;i<after.length;i++) {
@@ -86,8 +104,21 @@
           }
         }
       }
-      if (downThroughNet) { result='make'; reason='偵測到球在籃網區持續向下穿出'; }
-      else if (!interrupted && (rebound || bypass)) {
+      // A small, distant ball can cross the opening between adjacent frames.
+      // Require an interior crossing plus an observed point below the basket;
+      // disappearance alone is never enough to call a make.
+      let throughOpening = false;
+      for (let i=1;i<a.points.length;i++) {
+        const p=a.points[i-1], q=a.points[i];
+        if (p.y<cy && q.y>=cy && q.y>p.y && q.t-p.t<.16) {
+          const x=p.x+(q.x-p.x)*(cy-p.y)/(q.y-p.y);
+          if (x>=this.hoop.left+w*.14 && x<=this.hoop.right-w*.14) {
+            throughOpening ||= a.points.slice(i).some(r=>r.t-q.t<.38 && r.y>=cy+w*.5 && Math.abs(r.x-cx)<w*.95);
+          }
+        }
+      }
+      if (downThroughNet || throughOpening) { result='make'; reason=throughOpening?'偵測到球向下穿越籃圈內側，並在籃網下方出現':'偵測到球在籃網區持續向下穿出'; }
+      else if (rebound || bypass) {
         result='miss'; reason=rebound?'偵測到球在籃框附近反彈離開':'偵測到球從籃網通道外落下';
       } else if (interrupted) reason='錄影結束或影格中斷，保留為待確認';
       // Timestamp the initial encounter, rather than a later bounce near the rim.
@@ -126,7 +157,8 @@
         const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;
         let hue=0;
         if(d){if(mx===r)hue=((g-b)/d)%6;else if(mx===g)hue=(b-r)/d+2;else hue=(r-g)/d+4;hue*=30;if(hue<0)hue+=180;}
-        if(hue<=28 && mx>=45 && (mx?d/mx*255:0)>=65 && Math.abs(gray-this.background[i])>=22)mask[i]=1;
+        // Red hue wraps around zero. Include dark red balls as well as orange.
+        if((hue<=30 || hue>=165) && mx>=20 && (mx?d/mx*255:0)>=55 && Math.abs(gray-this.background[i])>=12)mask[i]=1;
         this.background[i]+=(gray-this.background[i])*.025;
       }
       const stack=new Int32Array(n), candidates=[],w=this.hoop.right-this.hoop.left;
