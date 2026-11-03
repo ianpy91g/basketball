@@ -64,7 +64,7 @@ try:
         page.wait_for_function('stream!==null && video.readyState>=2')
         select_hoop(page)
         page.locator('#startLiveButton').click()
-        page.wait_for_timeout(6500)
+        page.wait_for_function("tracker?.events.some(e=>e.result==='make')",timeout=15000)
         page.locator('#stopButton').click()
         page.wait_for_function("!document.querySelector('#downloadRecording').hidden")
         live_counts=page.evaluate('stats(data.events)')

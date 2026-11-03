@@ -16,7 +16,7 @@
   <script src="app.js" defer></script>
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="./"><span class="brand-icon">◉</span> 投籃簿<span class="beta">實驗版 v2.3</span></a><span class="local-label"><i></i> 影片留在你的裝置與本機電腦</span></header>
+  <header class="topbar"><a class="brand" href="./"><span class="brand-icon">◉</span> 投籃簿<span class="beta">實驗版 v2.4</span></a><span class="local-label"><i></i> 影片留在你的裝置與本機電腦</span></header>
   <main>
     <section class="heading"><div><h1>逐球回看</h1><p class="subtitle">影片與逐球紀錄一起看，專心觀察每次出手。</p></div><div class="session-mark"><span>SESSION</span><strong id="sessionDate">—</strong></div></section>
     <div class="setup-area">
@@ -48,7 +48,8 @@
           <p id="locationInfo" class="map-info">先分析影片，再選球標記位置。</p>
           <div class="map-actions"><button class="button small" id="markVideoPosition" disabled>點影片腳下位置</button><button class="button small" id="markMapPosition" disabled>直接在圖上標記</button><button class="button small" id="removePosition" disabled>清除此球位置</button></div>
           <div class="location-frame"><span>移到起跳前、雙腳著地的影格</span><button class="button small" id="locationBack" disabled>−0.1 秒</button><button class="button small" id="locationForward" disabled>＋0.1 秒</button></div>
-          <div class="court-calibration"><div class="map-actions"><button class="button small" id="calibrateCourt" disabled>校正球場（4 點）</button><button class="button small" id="undoCourtPoint" hidden>退回一點</button><button class="button small" id="cancelCourtAction" hidden>取消</button></div><select id="courtLandmark" aria-label="選擇球場校正地標" hidden></select><p id="courtHelp" role="status" aria-live="polite">尚未校正。地面線看不清時，可直接在球場圖標記大約位置。</p></div>
+          <div class="court-calibration"><div class="map-actions"><button class="button small" id="calibrateCourt" disabled>校正球場</button><button class="button small primary" id="finishCourtCalibration" hidden>完成</button><button class="button small" id="undoCourtPoint" hidden>退回一點</button><button class="button small" id="clearCourtPoints" hidden>清空點</button><button class="button small" id="cancelCourtAction" hidden>取消</button></div><select id="courtLandmark" aria-label="選擇球場校正地標" hidden></select><label class="mirror-label" id="courtMirrorLabel" hidden><input type="checkbox" id="courtMirror">少點粗估時反轉方向</label><p id="courtHelp" role="status" aria-live="polite">點選看得清楚的地標，點完按完成。</p></div>
+          <div class="auto-location"><div class="map-actions"><button class="button small" id="autoLocateShots" disabled>自動抓所有出手位置</button><button class="button small" id="confirmPosition" hidden>確認此球位置</button><button class="button small danger" id="stopAutoPosition" hidden>停止定位</button></div><p id="positionScanStatus" role="status" aria-live="polite">完成校正後，自動辨識已記錄各球的出手位置；結果仍可人工修正。首次需連網下載模型，影片在本裝置分析。</p></div>
           <details class="zone-summary"><summary>各區命中率</summary><div id="courtZones"></div><p>只計入已標位置的球；待確認不列入命中率。區域以 FIBA 2024 球場示意線劃分。</p></details>
         </section>
       </aside>

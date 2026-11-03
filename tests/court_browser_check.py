@@ -24,6 +24,7 @@ with sync_playwright() as p:
     page.on('pageerror',lambda e:errors.append(str(e)))
     page.goto('http://127.0.0.1:8772')
     page.wait_for_function('data?.events?.length===17 && video.readyState>=2 && !loading')
+    page.evaluate("data.events=data.events.slice(0,3);Court.createPoseEstimator=async()=>({detect:()=>({landmarks:[]})});refresh();")
     page.locator('#reviewMapTab').click()
     assert page.locator('#courtPanel').is_visible() and page.locator('#shotRows').is_hidden()
     scroll=page.evaluate('window.scrollY')
@@ -41,6 +42,9 @@ with sync_playwright() as p:
     for anchor,x,y in anchors:
         page.locator('#courtLandmark').select_option(anchor)
         click_image(page,x,y)
+    assert page.evaluate('courtAction===\'calibrate\' && courtPairs.length===4')
+    page.locator('#finishCourtCalibration').click()
+    page.wait_for_function('!positionScan && !loading',timeout=60000)
     assert page.evaluate('data.courtCalibration?.pairs.length===4 && courtAction===null')
     assert page.locator('#markVideoPosition').is_enabled()
     # Save a foot contact point and its source frame; no clamping of out-of-court positions.
@@ -68,12 +72,15 @@ with sync_playwright() as p:
     page.locator('#calibrateCourt').click()
     for anchor,x,y in anchors:
         page.locator('#courtLandmark').select_option(anchor);click_image(page,x,y+.04)
+    page.locator('#finishCourtCalibration').click()
+    page.wait_for_function('!positionScan && !loading',timeout=60000)
     changed=page.evaluate('data.events[1].position')
     assert abs(changed['y']-pos['y']-.58)<.05,(pos,changed)
     assert page.evaluate('Math.abs(data.events[0].position.x+5)<.1')
     # Cancelling a replacement calibration leaves the last confirmed one intact.
     original=page.evaluate('JSON.stringify(data.courtCalibration)')
     page.locator('#calibrateCourt').click()
+    page.locator('#clearCourtPoints').click()
     page.locator('#courtLandmark').select_option('key-left-base');click_image(page,.2,.8)
     page.locator('#undoCourtPoint').click();assert page.evaluate('courtPairs.length===0')
     page.locator('#cancelCourtAction').click()
@@ -96,7 +103,7 @@ with sync_playwright() as p:
         download.value.save_as(str(OUT/name))
     saved=json.loads((OUT/'court-export.json').read_text(encoding='utf8'))
     assert saved['courtCalibration']['pairs'] and saved['events'][1]['position']['method']=='video'
-    assert '人工影片定位' in (OUT/'court-export.csv').read_text(encoding='utf-8-sig')
+    assert '影片人工定位' in (OUT/'court-export.csv').read_text(encoding='utf-8-sig')
     page.evaluate("document.querySelector('#sessionSummary').open=false;window.scrollTo(0,0)")
     page.screenshot(path=str(OUT/'court-desktop.png'),full_page=True)
     for width,height,name in [(390,844,'mobile'),(844,390,'landscape')]:
@@ -117,6 +124,7 @@ with sync_playwright() as p:
     phone=mobile.new_page();phone.on('pageerror',lambda e:errors.append(str(e)))
     phone.goto('http://127.0.0.1:8772')
     phone.wait_for_function('data?.events?.length===17 && video.readyState>=2 && !loading')
+    phone.evaluate("data.events=data.events.slice(0,3);Court.createPoseEstimator=async()=>({detect:()=>({landmarks:[]})});refresh();")
     phone.locator('#reviewMapTab').tap();phone.locator('#mapShot').select_option('1')
     phone.locator('#markMapPosition').tap()
     p=phone.evaluate('''()=>{const p=new DOMPoint(2,8).matrixTransform(document.querySelector('#courtGraphic svg').getScreenCTM());return {x:p.x,y:p.y};}''')
@@ -130,8 +138,12 @@ with sync_playwright() as p:
         scale=min(bounds['width']/w,bounds['height']/h)
         phone.touchscreen.tap(bounds['x']+(bounds['width']-w*scale)/2+x*w*scale,
                               bounds['y']+(bounds['height']-h*scale)/2+y*h*scale)
+    phone.locator('#finishCourtCalibration').tap()
+    phone.wait_for_function('!positionScan && !loading',timeout=60000)
     assert phone.evaluate('data.courtCalibration?.pairs.length===4')
-    assert phone.evaluate('window.scrollY===0')
+    phone.screenshot(path=str(OUT/'court-touch-finish.png'),full_page=True)
+    assert phone.evaluate('window.scrollY===0'),phone.evaluate('({scroll:scrollY,workspace:document.querySelector("#workspace").getBoundingClientRect().toJSON()})')
+    assert phone.evaluate('''()=>{const p=document.querySelector('#courtPanel').getBoundingClientRect(),c=document.querySelector('#courtGraphic').getBoundingClientRect();return c.top>=p.top-1&&c.bottom<=p.bottom+1;}''')
     assert not errors,errors
     print(json.dumps({'manual_map':'passed','ground_calibration':'passed','video_foot_location':'passed','out_of_court_rejected':'passed','recalibration':'passed','cancel_undo':'passed','correction_sync':'passed','export_history':'passed','mobile_layout_touch':'passed','page_errors':errors,'reference_points':'synthetic, not measured court positions'}),flush=True)
     browser.close()
