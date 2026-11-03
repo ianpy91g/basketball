@@ -6,16 +6,17 @@
   <meta name="theme-color" content="#101914">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="投籃簿">
-  <meta name="description" content="影片與逐球清單同畫面回看，支援單球循環、依序播放及投籃統計。">
+  <meta name="description" content="逐球回看、人工球場校正與投籃位置圖，記錄每個出手位置的進球和未進。">
   <title>投籃簿｜逐球回看</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="manifest" href="site.webmanifest">
   <link rel="stylesheet" href="styles.css">
   <script src="tracker.js" defer></script>
+  <script src="court.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body>
-  <header class="topbar"><a class="brand" href="./"><span class="brand-icon">◉</span> 投籃簿<span class="beta">實驗版 v2.2</span></a><span class="local-label"><i></i> 影片留在你的裝置與本機電腦</span></header>
+  <header class="topbar"><a class="brand" href="./"><span class="brand-icon">◉</span> 投籃簿<span class="beta">實驗版 v2.3</span></a><span class="local-label"><i></i> 影片留在你的裝置與本機電腦</span></header>
   <main>
     <section class="heading"><div><h1>逐球回看</h1><p class="subtitle">影片與逐球紀錄一起看，專心觀察每次出手。</p></div><div class="session-mark"><span>SESSION</span><strong id="sessionDate">—</strong></div></section>
     <div class="setup-area">
@@ -36,9 +37,20 @@
       </section>
       <aside class="review-panel" aria-label="逐球清單">
         <div class="review-heading"><div><p class="eyebrow">SHOT BY SHOT</p><h2>逐球紀錄</h2></div><div class="review-controls"><span id="reviewCount">尚無紀錄</span><button class="button small" id="addShot" disabled>＋ 補記</button></div></div>
+        <div class="review-tabs" role="tablist" aria-label="回看內容"><button id="reviewListTab" role="tab" aria-selected="true" aria-controls="shotRows">逐球清單</button><button id="reviewMapTab" role="tab" aria-selected="false" aria-controls="courtPanel">投籃位置圖</button></div>
         <div class="shot-strip" id="shotStrip" aria-label="球號快速選擇"><p>分析完成後，在這裡選球回看。</p></div>
         <div class="shot-list" id="shotRows" role="list" aria-label="逐球結果與修正"></div>
         <div class="review-empty" id="reviewEmpty">分析完成後，每球紀錄會出現在這裡。</div>
+        <section id="courtPanel" class="court-panel" role="tabpanel" aria-labelledby="reviewMapTab" hidden>
+          <div class="map-shot-picker"><label for="mapShot">目前球號</label><select id="mapShot" disabled><option>尚無投籃紀錄</option></select><span id="mapProgress">0 球已定位</span></div>
+          <div id="courtGraphic" class="court-graphic"></div>
+          <div class="court-legend"><span class="map-make">● 進球</span><span class="map-miss">× 未進</span><span>◇ 待確認</span></div>
+          <p id="locationInfo" class="map-info">先分析影片，再選球標記位置。</p>
+          <div class="map-actions"><button class="button small" id="markVideoPosition" disabled>點影片腳下位置</button><button class="button small" id="markMapPosition" disabled>直接在圖上標記</button><button class="button small" id="removePosition" disabled>清除此球位置</button></div>
+          <div class="location-frame"><span>移到起跳前、雙腳著地的影格</span><button class="button small" id="locationBack" disabled>−0.1 秒</button><button class="button small" id="locationForward" disabled>＋0.1 秒</button></div>
+          <div class="court-calibration"><div class="map-actions"><button class="button small" id="calibrateCourt" disabled>校正球場（4 點）</button><button class="button small" id="undoCourtPoint" hidden>退回一點</button><button class="button small" id="cancelCourtAction" hidden>取消</button></div><select id="courtLandmark" aria-label="選擇球場校正地標" hidden></select><p id="courtHelp" role="status" aria-live="polite">尚未校正。地面線看不清時，可直接在球場圖標記大約位置。</p></div>
+          <details class="zone-summary"><summary>各區命中率</summary><div id="courtZones"></div><p>只計入已標位置的球；待確認不列入命中率。區域以 FIBA 2024 球場示意線劃分。</p></details>
+        </section>
       </aside>
     </div>
     <details class="summary-panel" id="sessionSummary"><summary><span>整體統計、匯出與練習紀錄</span><span id="summaryBrief">需要時再展開查看</span></summary>

@@ -76,6 +76,22 @@ try:
     assert api('/api/health')['analysis_version']==3
     with urlopen(base+'/app.js') as r:assert r.headers['Cache-Control']=='no-store'
     with urlopen(base+'/site.webmanifest') as r:assert r.status==200
+    with urlopen(base+'/court.js') as r:assert r.status==200
+    # Converted clips and their original names remain available after a server restart.
+    process.terminate();process.wait(timeout=10)
+    process=subprocess.Popen([sys.executable,'server.py','--port',str(port)],cwd=case,stdout=log,stderr=log)
+    deadline=time.monotonic()+20
+    while True:
+        try:
+            if api('/api/health')['pid']==process.pid:break
+        except OSError:
+            pass
+        assert time.monotonic()<deadline,'Restarted server did not start'
+        time.sleep(.15)
+    restored=api('/api/jobs/'+job_id)
+    assert restored['status']=='complete' and restored['filename']=='upload-test.mp4',restored
+    assert api('/media/'+job_id+'/analysis.json')['summary']['make']==1
+    with urlopen(base+'/media/'+job_id+'/video.mp4') as r:assert r.status==200
     blank=case/'empty.mp4'
     subprocess.run(['ffmpeg','-hide_banner','-loglevel','error','-f','lavfi','-i','color=c=gray:s=960x540:r=30:d=1','-an','-c:v','libx264','-preset','ultrafast','-y',str(blank)],check=True)
     errors=[]
@@ -86,6 +102,7 @@ try:
         page.goto(base)
         page.wait_for_function('backend===true')
         ui_analyze(page,ROOT/'artifacts/upload-test.mp4')
+        page.locator('#sessionSummary > summary').click()
         assert page.locator('#makes').inner_text()=='1'
         assert '分析完成' in page.locator('#status').inner_text()
         ui_analyze(page,blank)
@@ -107,6 +124,7 @@ try:
         legacy.evaluate('hoop={left:48,top:130,right:110,bottom:156};controls();')
         legacy.locator('#analyzeButton').click()
         legacy.wait_for_function("data?.analysis_state==='complete'",timeout=15000)
+        legacy.locator('#sessionSummary > summary').click()
         assert legacy.locator('#makes').inner_text()=='1'
         assert not posts,posts
         assert not errors,errors

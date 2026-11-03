@@ -20,13 +20,45 @@ from urllib.request import urlopen
 import analyze
 
 ROOT = analyze.ROOT
-SERVER_VERSION = '2.1'
+SERVER_VERSION = '2.2'
 
 UPLOADS = ROOT/'artifacts/uploads'
 JOBS = {}
 GUARD = threading.Lock()
 # Bound CPU work; camera inference stays in the browser.
 WORKER = threading.Semaphore(1)
+
+
+def get_job(job_id):
+    """Recover converted local clips after an app update without losing their URLs."""
+    if not re.fullmatch(r'[a-f0-9]{32}', job_id):
+        return None
+    with GUARD:
+        if job_id in JOBS:
+            return JOBS[job_id]
+        directory = UPLOADS/job_id
+        if not (directory/'video.mp4').is_file():
+            return None
+        sources = [directory/('input'+suffix) for suffix in ('.mts', '.m2ts', '.mp4', '.mov', '.m4v', '.webm')]
+        source = next((p for p in sources if p.is_file()), None)
+        if not source:
+            return None
+        result, metadata = {}, {}
+        for name, target in [('analysis.json', result), ('job.json', metadata)]:
+            try:
+                value = json.loads((directory/name).read_text(encoding='utf-8'))
+                if isinstance(value, dict):
+                    target.update(value)
+            except (OSError, ValueError):
+                pass
+        complete = isinstance(result.get('events'), list)
+        job = {'directory': directory, 'input': source,
+               'filename': metadata.get('filename') or result.get('source') or source.name,
+               'status': 'complete' if complete else 'ready', 'progress': 1}
+        if complete:
+            job['analysis_version'] = result.get('version', 1)
+        JOBS[job_id] = job
+        return job
 
 
 def run_job(job_id, mode, hoop=None):
@@ -69,10 +101,11 @@ class Handler(BaseHTTPRequestHandler):
                               'server_version': SERVER_VERSION,
                               'analysis_version': analyze.ANALYSIS_VERSION,
                               'pid': os.getpid(),
-                              'sample': (ROOT/'artifacts/analysis.json').exists()})
+                              'sample': (ROOT/'artifacts/analysis.json').exists(),
+                              'active_jobs': sum(j['status'] in {'queued', 'converting', 'analyzing'} for j in JOBS.values())})
         match = re.fullmatch(r'/api/jobs/([a-f0-9]{32})', path)
         if match:
-            job = JOBS.get(match[1])
+            job = get_job(match[1])
             if not job:
                 return self.json({'error': '找不到工作'}, 404)
             return self.json({k: job[k] for k in ('status', 'progress', 'filename', 'error', 'analysis_version') if k in job})
@@ -81,10 +114,12 @@ class Handler(BaseHTTPRequestHandler):
         if path in sample:
             return self.file(ROOT/'artifacts'/sample[path])
         match = re.fullmatch(r'/media/([a-f0-9]{32})/(video.mp4|analysis.json|shots.csv)', path)
-        if match and match[1] in JOBS:
-            return self.file(JOBS[match[1]]['directory']/match[2])
+        if match:
+            job = get_job(match[1])
+            if job:
+                return self.file(job['directory']/match[2])
         assets = {'/': 'index.html', '/index.html': 'index.html', '/styles.css': 'styles.css',
-                  '/app.js': 'app.js', '/tracker.js': 'tracker.js',
+                  '/app.js': 'app.js', '/tracker.js': 'tracker.js', '/court.js': 'court.js',
                   '/icon.svg': 'icon.svg', '/site.webmanifest': 'site.webmanifest'}
         if path in assets:
             return self.file(ROOT/'app'/assets[path])
@@ -165,13 +200,13 @@ class Handler(BaseHTTPRequestHandler):
                 source.unlink(missing_ok=True)
                 return self.json({'error': str(exc)}, 400)
             with GUARD:
+                (directory/'job.json').write_text(json.dumps({'filename': name}, ensure_ascii=False), encoding='utf-8')
                 JOBS[job_id] = {'directory': directory, 'input': source, 'filename': name,
                                 'status': 'queued', 'progress': 0}
             threading.Thread(target=run_job, args=(job_id, 'convert'), daemon=True).start()
             return self.json({'id': job_id}, 202)
         match = re.fullmatch(r'/api/jobs/([a-f0-9]{32})/analyze', path)
-        if match and match[1] in JOBS:
-            job = JOBS[match[1]]
+        if match and (job := get_job(match[1])):
             if not 0 < length < 4096:
                 return self.json({'error': '無效的籃框設定'}, 400)
             try:

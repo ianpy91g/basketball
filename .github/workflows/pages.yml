@@ -37,6 +37,8 @@ jobs:
           node --check app/app.js
           node --check app/tracker.js
           node tests/tracker.test.cjs
+          node --check app/court.js
+          node tests/court.test.cjs
       - name: Build static app
         run: node tools/build-pages.cjs
       - name: Check deployment artifact

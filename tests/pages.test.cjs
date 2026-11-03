@@ -3,7 +3,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const path=require('node:path');
 const root=path.resolve(__dirname,'..'),dir=path.join(root,'dist');
-const expected=['.nojekyll','index.html','app.js','tracker.js','styles.css','icon.svg','site.webmanifest'].sort();
+const expected=['.nojekyll','index.html','app.js','tracker.js','court.js','styles.css','icon.svg','site.webmanifest'].sort();
 assert.deepEqual(fs.readdirSync(dir).sort(),expected);
 const html=fs.readFileSync(path.join(dir,'index.html'),'utf8');
 assert.ok(html.includes('window.SHOTBOOK_HOSTED=true'));
