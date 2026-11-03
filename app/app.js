@@ -12,6 +12,7 @@ let calibrating=false, dragStart=null, dragEnd=null, sessionId=null, sourceKind=
 let localEngineNotice='';
 const REQUIRED_ANALYSIS_VERSION=2;
 const TRAJECTORY_COLOR='#ff8c00';
+const HOOP_COLOR='#003b8e';
 let selectedShotId=null,clipPlayback=false,reviewFrame=null,reviewAction=0,reviewSeek=false,sequenceFinished=false;
 let replayMode='loop';
 try{const saved=localStorage.getItem('basketball.playback-mode');if(['loop','sequence','once'].includes(saved))replayMode=saved;}catch{}
@@ -207,7 +208,7 @@ video.addEventListener('error',()=>{if(sourceKind==='local')message('此瀏覽�
 function draw(candidates=[]){
   ctx.clearRect(0,0,overlay.width,overlay.height);
   const box=calibrating&&dragStart&&dragEnd?{left:Math.min(dragStart.x,dragEnd.x),right:Math.max(dragStart.x,dragEnd.x),top:Math.min(dragStart.y,dragEnd.y),bottom:Math.max(dragStart.y,dragEnd.y)}:hoop;
-  if(box){ctx.strokeStyle='#cbef91';ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.strokeRect(box.left,box.top,box.right-box.left,box.bottom-box.top);ctx.setLineDash([]);}
+  if(box){ctx.strokeStyle=HOOP_COLOR;ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.strokeRect(box.left,box.top,box.right-box.left,box.bottom-box.top);ctx.setLineDash([]);}
   const t=mode==='live'&&stream?Math.max(0,video.currentTime-origin):video.currentTime;
   const current=running?tracker?.active?.points:(selectedShot()||(data?.events||[]).find(e=>t>=e.start&&t<=e.end))?.points;
   if(current){
